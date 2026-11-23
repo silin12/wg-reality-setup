@@ -27,10 +27,19 @@ VPS 38.22.94.13 (ens17)
 
 ```sh
 bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh)
-# 可选：VMLAN=192.168.10.0/24 bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh)
+# 也可用环境变量预填：VMLAN=192.168.4.0/24 bash <(curl -fsSL .../vps-setup.sh)
 ```
 
 跑完输出两段东西：中国侧客户端 vless 链接，以及 `SERVER_PUBLIC_KEY`、`VM_PRIVATE_KEY` 两个值。
+
+### VPS 脚本参数
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `VMLAN` | `192.168.10.0/24` | 国外 OpenWrt 内网网段，部署时提示输入 |
+| `WAN_IF` | `ens17` | VPS 公网网卡 |
+| `REALITY_PORT` | `5678` | REALITY 入站端口 |
+| `SERVER_PUBLIC_IP` | `38.22.94.13` | 写进客户端链接 |
 
 **第二步：在国外 OpenWrt VM 上跑**（先下载；脚本会逐项提示输入 VPS IP、端口、密钥，直接回车走默认值）
 
