@@ -64,7 +64,7 @@ SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.
 部署完成后，随时可以用脚本的 `show-keys` 子命令复查已保存的密钥，不会改动任何配置：
 
 ```sh
-# VPS 上查 WireGuard 公钥 / OpenWrt 私钥
+# VPS 上查 WireGuard 公钥 / OpenWrt 私钥（同时输出 vless 客户端链接）
 bash /root/vps-setup.sh show-keys
 # 或走 raw：bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh) show-keys
 
