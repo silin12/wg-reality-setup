@@ -28,11 +28,14 @@ XRAY_CONF=/usr/local/etc/xray/config.json
 echo "==> 1/6 安装依赖"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y wireguard-tools curl openssl
+apt-get install -y wireguard-tools curl openssl iptables
 
 echo "==> 2/6 开启 IPv4 转发"
-sed -i '/^net.ipv4.ip_forward/d' /etc/sysctl.conf
-echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+mkdir -p /etc/sysctl.d
+if [ -f /etc/sysctl.conf ]; then
+  sed -i '/^net.ipv4.ip_forward/d' /etc/sysctl.conf
+fi
+printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-wg-reality.conf
 sysctl -w net.ipv4.ip_forward=1
 
 echo "==> 3/6 初始化 WireGuard 服务端"
