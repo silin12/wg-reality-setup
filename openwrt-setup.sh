@@ -110,8 +110,8 @@ echo "已写入 /etc/wireguard/wg0.conf"
 echo "==> 3/4 防火墙放行 wg0"
 if [ "$DRY_RUN" != "1" ]; then
   uci -q add_list firewall.lan.network='wg0'
-  uci commit firewall
-  /etc/init.d/firewall restart
+  uci commit firewall || echo "警告: uci commit firewall 返回非零，继续后续步骤"
+  /etc/init.d/firewall restart || echo "警告: 防火墙重启返回非零，继续后续步骤"
 else
   echo "[DRY_RUN] 跳过 uci 写入与防火墙重启"
 fi
@@ -127,7 +127,7 @@ INIT
 chmod +x /etc/init.d/wg0
 
 if [ "$DRY_RUN" != "1" ]; then
-  /etc/init.d/wg0 enable
+  /etc/init.d/wg0 enable || echo "警告: 开机自启注册返回非零"
   wg-quick up wg0 || true
 else
   echo "[DRY_RUN] 跳过开机自启与隧道启动"
