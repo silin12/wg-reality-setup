@@ -13,6 +13,7 @@
 # 可选环境变量：
 #   VM_IP=10.77.0.2     隧道本机 IP
 #   LAN_IF=br-lan       OpenWrt LAN 网卡名
+#   SKIP_INSTALL=1      跳过 opkg 装包（内核模块/工具已自带时用）
 #   DRY_RUN=1           只生成配置，不装包/不重启服务（用于校验）
 # ============================================================
 set -eu
@@ -75,11 +76,13 @@ echo
 DRY_RUN=${DRY_RUN:-0}
 
 echo "==> 1/4 安装 WireGuard 组件"
-if [ "$DRY_RUN" != "1" ]; then
+if [ "$DRY_RUN" = "1" ]; then
+  echo "[DRY_RUN] 跳过 opkg update / install"
+elif [ "${SKIP_INSTALL:-0}" = "1" ]; then
+  echo "[SKIP_INSTALL] 跳过软件包安装（假定 kmod-wireguard / wireguard-tools 已装）"
+else
   opkg update
   opkg install kmod-wireguard wireguard-tools luci-proto-wireguard
-else
-  echo "[DRY_RUN] 跳过 opkg update / install"
 fi
 
 echo "==> 2/4 写入 wg0 配置"
