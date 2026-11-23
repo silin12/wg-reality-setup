@@ -1,4 +1,4 @@
-# 跨境组网：VPS REALITY 入口 + WireGuard 到国外 OpenWrt VM
+# 跨境组网配置包：VPS REALITY 入口 + WireGuard 到国外 OpenWrt VM
 
 ## 拓扑
 
@@ -8,7 +8,8 @@
    ▼
 VPS 38.22.94.13 (ens17)
    ├─ Xray REALITY 入站 :5678
-   ├─ WireGuard 服务端 wg0 :51820/UDP  10.77.0.1/24
+   ├─ WireGuard 服务端 wg0 :51820/UDP
+   │     10.77.0.1/24
    ▼  WireGuard 隧道
 国外 OpenWrt VM (bridge)
    ├─ wg0 10.77.0.2/24
@@ -16,56 +17,29 @@ VPS 38.22.94.13 (ens17)
 ```
 
 - 中国侧连 VPS 的 5678；要访问国外 VM 内网时，客户端把 `192.168.10.0/24` 路由走代理，VPS 经 WireGuard 送到 VM。
-- 不做「全局从 VM 出口」：默认流量从 VPS 自己出网；只把目标是国外网段的流量甩给 WireGuard。
+- 不做「全局从 VM 出口」：默认流量从 VPS 自己出网；只把目标是国外网段的流量甩给 WireGuard。要全局走 VM 出口需要另外在 VPS 上改默认路由 + SNAT，风险高，本方案不做。
 
 ## 一键脚本
 
-### 第一步：VPS 上执行（Debian/Ubuntu）
+脚本已上架 GitHub 独立仓库 `silin12/wg-reality-setup`，直接用 raw 链接跑。
 
-自动装 WireGuard + Xray，生成密钥、UUID、客户端链接：
+**第一步：在 VPS 上跑**（自动装 WG + Xray，生成密钥、UUID、客户端链接）
 
 ```sh
 bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh)
+# 可选：VMLAN=192.168.10.0/24 bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh)
 ```
 
-带参数（按 VM 实际网段改）：
+跑完输出两段东西：中国侧客户端 vless 链接，以及 `SERVER_PUBLIC_KEY`、`VM_PRIVATE_KEY` 两个值。
 
-```sh
-VMLAN=192.168.10.0/24 bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh)
-```
-
-跑完输出：中国侧客户端 vless 链接，以及 `SERVER_PUBLIC_KEY`、`VM_PRIVATE_KEY` 两个值。
-
-### 第二步：国外 OpenWrt VM 上执行
-
-先下载脚本（OpenWrt ash 不支持进程替换），再把上一步两个值填进去：
+**第二步：在国外 OpenWrt VM 上跑**（先下载，再把上一步两个值填进去；ash 不支持进程替换）
 
 ```sh
 wget -O /tmp/openwrt-setup.sh https://raw.githubusercontent.com/silin12/wg-reality-setup/main/openwrt-setup.sh
 SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.sh
 ```
 
-## 环境变量
-
-### vps-setup.sh
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `VMLAN` | `192.168.10.0/24` | 国外 OpenWrt VM 的内网网段 |
-| `WAN_IF` | `ens17` | VPS 公网网卡 |
-| `REALITY_PORT` | `5678` | REALITY 入站端口 |
-| `SERVER_PUBLIC_IP` | `38.22.94.13` | VPS 公网 IP，写进客户端链接 |
-| `WG_PORT` | `51820` | WireGuard 服务端端口 |
-
-### openwrt-setup.sh
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `SERVER_PUBLIC_KEY` | （必填） | VPS WireGuard 公钥 |
-| `VM_PRIVATE_KEY` | （必填） | VM WireGuard 私钥 |
-| `SERVER_ENDPOINT` | `38.22.94.13:51820` | VPS 隧道地址 |
-| `VM_IP` | `10.77.0.2` | VM 隧道 IP |
-| `LAN_IF` | `br-lan` | OpenWrt LAN 网卡 |
+> GitHub 仓库：`silin12/wg-reality-setup`，根目录 `vps-setup.sh`（VPS）、`openwrt-setup.sh`（OpenWrt VM）。手工拆分的模板仍在 `server/`、`openwrt/` 目录备查。
 
 ## 端口与地址规划
 
@@ -78,20 +52,61 @@ SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.
 | 国外 VM 内网段 | `192.168.10.0/24` | **占位，按 VM 实际 LAN 改** |
 | REALITY 伪装站 | `www.microsoft.com:443` | 可换 `dl.google.com:443` 等可达大站 |
 
-## 部署前待确认
+## 待补参数（部署前确认）
 
-1. 国外 OpenWrt VM 的实际内网网段（`192.168.x.0/24`）和 LAN 网卡名（通常 `br-lan`）
+1. 国外 OpenWrt VM 的实际内网网段（`192.168.x.0/24`）和它 LAN 网卡名（通常 `br-lan`）
 2. 中国侧设备类型：Windows（v2rayN / Karing 桌面版）还是 Android（v2rayNG / Karing）
-3. 是否整段国外内网都走代理（默认是），还是只放行个别 IP
+3. 是否需要在客户端把整段国外内网都走代理（默认是），还是只放行个别 IP
 
-## 连通性自检
+## 文件
+
+- `server/wireguard.sh` — VPS 上装 WireGuard、写 `wg0.conf`、开转发和 NAT（参数占位，跑完生成密钥）
+- `server/xray-config.json` — VPS 上 Xray REALITY 入站配置模板
+- `openwrt/wg0.conf` — 国外 OpenWrt VM 上的 WireGuard 客户端配置模板
+- 客户端订阅链接见文末「中国侧客户端」
+
+## 部署顺序
+
+1. VPS：跑 `server/wireguard.sh`，拿到 VM 需要的公钥
+2. VPS：装 Xray，填 `server/xray-config.json`，systemd 起服务
+3. 国外 VM：装 `kmod-wireguard wireguard-tools luci-proto-wireguard`，填 `openwrt/wg0.conf`，起 wg0，放行转发与 NAT
+4. 验证：VPS `ping 10.77.0.2`；VM `ping 10.77.0.1`；从 VPS `ping 192.168.10.x`
+5. 中国侧：导入 vless 链接，把国外内网段加到代理路由规则
+
+## VPS 上 Xray 安装与出客户端链接
+
+```sh
+# 1. 安装 Xray（官方脚本，装到 /usr/local/xray）
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+
+# 2. 生成 REALITY 密钥对，私钥填 config，公钥给客户端
+/usr/local/xray/xray x25519
+
+# 3. 生成 UUID 与 shortId
+cat /proc/sys/kernel/random/uuid
+openssl rand -hex 8
+
+# 4. 把 server/xray-config.json 填好后放到 /usr/local/etc/xray/config.json
+systemctl enable --now xray
+systemctl status xray
+```
+
+客户端分享链接（占位符替换后导入 Karing / v2rayNG / v2rayN）：
+
+```
+vless://<UUID>@38.22.94.13:5678?security=reality&sni=www.microsoft.com&fp=chrome&pbk=<REALITY_PUBLIC_KEY>&sid=<SHORT_ID>&flow=xtls-rprx-vision&type=tcp#foreign-relay
+```
+
+## 中国侧客户端路由
+
+- 默认：访问国外 VM 内网时，把 `192.168.10.0/24` 加进「走代理」规则；其余流量直连
+- 想整体走 VPS 出口：客户端开全局模式（注意这时出口是 VPS 所在地，不是 VM）
+- 手机端 Karing / v2rayNG；Windows 端 Karing 桌面版 / v2rayN，导入链接即可
+
+## 连通性自检顺序
 
 1. VPS `wg show` 能看到 VM 握手（latest handshake 非空）
 2. VPS `ping 10.77.0.2` 通；VM `ping 10.77.0.1` 通
 3. VPS `ping 192.168.10.<VM 内网 IP>` 通
 4. 中国侧连上 REALITY 后，浏览器打开 `http://192.168.10.<VM 内网 IP>`
 
-## 客户端
-
-- 手机端：Karing / v2rayNG；Windows 端：Karing 桌面版 / v2rayN
-- 导入 vless 链接后，把国外内网段加进「走代理」规则；其余流量直连
