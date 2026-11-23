@@ -35,6 +35,12 @@ case "${1:-}" in
     fi
     echo "== WireGuard 密钥（OpenWrt 端部署时填） =="
     grep -E '^(SERVER_PUBLIC_KEY|VM_PRIVATE_KEY|VM_IP)=' "$KEYS_FILE"
+    LINK_FILE=/etc/wireguard/client-link.txt
+    if [ -f "$LINK_FILE" ]; then
+      echo
+      echo "== 中国侧客户端 vless 链接 =="
+      cat "$LINK_FILE"
+    fi
     exit 0
     ;;
 esac
@@ -145,6 +151,8 @@ sleep 2
 systemctl is-active xray
 
 CLIENT_LINK="vless://${UUID}@${SERVER_PUBLIC_IP}:${REALITY_PORT}?security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${REALITY_PUB}&sid=${SHORT_ID}&flow=xtls-rprx-vision&type=tcp#foreign-relay"
+printf '%s\n' "$CLIENT_LINK" > /etc/wireguard/client-link.txt
+chmod 600 /etc/wireguard/client-link.txt
 
 echo
 echo "==================== 部署完成 ===================="
