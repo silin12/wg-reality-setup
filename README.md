@@ -62,6 +62,14 @@ SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
 SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.sh
 ```
 
+**第三步（仅 Windows 客户端需要）：浏览器打不开 LuCI 时跑**（去掉代理例外里的 `192.168.*`、重启 v2rayN、顺带重启 ZeroTier 备用通道）
+
+```powershell
+# 下载后在 PC 的 PowerShell 里执行
+irm https://raw.githubusercontent.com/silin12/wg-reality-setup/main/pc-fix-luci.ps1 -OutFile $env:TEMP\pc-fix-luci.ps1
+powershell -ExecutionPolicy Bypass -File $env:TEMP\pc-fix-luci.ps1
+```
+
 ### OpenWrt 脚本参数
 
 | 变量 | 默认值 | 说明 |
@@ -151,6 +159,7 @@ vless://<UUID>@38.22.94.13:5678?security=reality&sni=www.microsoft.com&fp=chrome
 
 - 默认：访问国外 VM 内网时，把 `192.168.4.0/24` 加进「走代理」规则；其余流量直连
 - **v2rayN 注意**：该规则要排在「绕过局域网 IP（geoip:private）」之前，否则私网地址会被直连规则抢先命中；示例出站规则：`ip = 192.168.4.0/24 → proxy`
+- **Windows 系统代理例外注意（浏览器打不开 LuCI 的常见原因）**：v2rayN 的系统代理例外（`SystemProxyExceptions`）和注册表 `ProxyOverride` 里不能保留 `192.168.*`。否则浏览器一看到 `192.168.4.1` 就判定为本地内网、绕过代理直连；而直连备用通道（ZeroTier 等）若没起，结果就是超时。修法：例外列表删掉 `192.168.*`，重启 v2rayN；一键修复见 `pc-fix-luci.ps1`。
 - 想整体走 VPS 出口：客户端开全局模式（注意这时出口是 VPS 所在地，不是 VM）
 - 手机端 Karing / v2rayNG；Windows 端 Karing 桌面版 / v2rayN，导入链接即可
 
