@@ -79,11 +79,15 @@ echo "==> 1/4 安装 WireGuard 组件"
 if [ "$DRY_RUN" = "1" ]; then
   echo "[DRY_RUN] 跳过 opkg update / install"
 elif [ "${SKIP_INSTALL:-0}" = "1" ]; then
-  if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
-    echo "错误：SKIP_INSTALL=1 但未找到 wg / wg-quick，请去掉 SKIP_INSTALL 正常装包，或先手动安装 wireguard-tools" >&2
+  if ! command -v wg >/dev/null 2>&1; then
+    echo "错误：SKIP_INSTALL=1 但未找到 wg，请先手动安装 kmod-wireguard / wireguard-tools" >&2
     exit 1
   fi
-  echo "[SKIP_INSTALL] 跳过软件包安装（已检测到 wg / wg-quick）"
+  if command -v wg-quick >/dev/null 2>&1; then
+    echo "[SKIP_INSTALL] 跳过软件包安装（已检测到 wg / wg-quick）"
+  else
+    echo "[SKIP_INSTALL] 未检测到 wg-quick，将使用手动方式拉起隧道"
+  fi
 else
   opkg update
   opkg install kmod-wireguard wireguard-tools luci-proto-wireguard
@@ -107,6 +111,36 @@ EOF
 chmod 600 /etc/wireguard/wg0.conf
 echo "已写入 /etc/wireguard/wg0.conf"
 
+# 拉起隧道：优先 wg-quick；缺失时手动创建接口并加载精简配置
+# （wg setconf 不识别 Address/PostUp/PostDown/DNS 等 wg-quick 专属行）
+PEER_IP="${VM_IP%.*}.1"
+wg_start() {
+  if command -v wg-quick >/dev/null 2>&1; then
+    wg-quick up wg0
+    return 0
+  fi
+  ip link del wg0 2>/dev/null || true
+  ip link add wg0 type wireguard
+  ip addr add ${VM_IP}/24 dev wg0
+  awk '!/^[[:space:]]*(Address|PostUp|PostDown|DNS)[[:space:]]*=/' \
+    /etc/wireguard/wg0.conf > /tmp/wg0-nolink.conf
+  wg setconf wg0 /tmp/wg0-nolink.conf
+  ip link set wg0 up
+  ip route replace ${PEER_IP}/32 dev wg0
+  iptables -A FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+  iptables -t nat -A POSTROUTING -o ${LAN_IF} -j MASQUERADE 2>/dev/null || true
+}
+
+wg_stop() {
+  if command -v wg-quick >/dev/null 2>&1; then
+    wg-quick down wg0
+    return 0
+  fi
+  iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+  iptables -t nat -D POSTROUTING -o ${LAN_IF} -j MASQUERADE 2>/dev/null || true
+  ip link del wg0 2>/dev/null || true
+}
+
 echo "==> 3/4 防火墙放行 wg0"
 if [ "$DRY_RUN" != "1" ]; then
   uci -q add_list firewall.lan.network='wg0'
@@ -117,18 +151,38 @@ else
 fi
 
 echo "==> 4/4 配置开机自启并启动隧道"
-cat > /etc/init.d/wg0 <<'INIT'
+cat > /etc/init.d/wg0 <<INIT
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
-start() { wg-quick up wg0 }
-stop()  { wg-quick down wg0 }
+WG_IP=${VM_IP}
+PEER_IP=${PEER_IP}
+CONF=/etc/wireguard/wg0.conf
+start() {
+    if command -v wg-quick >/dev/null 2>&1; then
+        wg-quick up wg0
+    else
+        ip link add wg0 type wireguard 2>/dev/null
+        ip addr add \${WG_IP}/24 dev wg0 2>/dev/null
+        awk '!/^[[:space:]]*(Address|PostUp|PostDown|DNS)[[:space:]]*=/' "\$CONF" > /tmp/wg0-nolink.conf
+        wg setconf wg0 /tmp/wg0-nolink.conf
+        ip link set wg0 up
+        ip route replace \${PEER_IP}/32 dev wg0
+    fi
+}
+stop() {
+    if command -v wg-quick >/dev/null 2>&1; then
+        wg-quick down wg0
+    else
+        ip link del wg0 2>/dev/null
+    fi
+}
 INIT
 chmod +x /etc/init.d/wg0
 
 if [ "$DRY_RUN" != "1" ]; then
   /etc/init.d/wg0 enable || echo "警告: 开机自启注册返回非零"
-  wg-quick up wg0 || true
+  wg_start || true
 else
   echo "[DRY_RUN] 跳过开机自启与隧道启动"
 fi
