@@ -1,7 +1,9 @@
 #!/bin/sh
 # ============================================================
 # 一键脚本：国外 OpenWrt VM 侧（交互输入 VPS 地址/端口与密钥）
-# 作用：装 WireGuard 客户端配置，拨入 VPS 隧道，放行转发与 NAT
+# 作用：用 netifd 原生 wireguard 协议拨入 VPS 隧道，并持久化放行
+#       wg0 / ZeroTier 网卡的本机访问与转发。
+# 说明：不依赖 wg-quick（部分固件只装了一半 wireguard-tools，无 wg-quick）。
 #
 # 用法一（交互式，逐项提示输入）：
 #   sh openwrt-setup.sh
@@ -11,26 +13,23 @@
 #   SERVER_PUBLIC_KEY=xxx VM_PRIVATE_KEY=xxx sh openwrt-setup.sh
 #
 # 可选环境变量：
-#   VM_IP=10.77.0.2     隧道本机 IP
-#   LAN_IF=br-lan       OpenWrt LAN 网卡名
-#   SKIP_INSTALL=1      跳过 opkg 装包（内核模块/工具已自带时用）
-#   DRY_RUN=1           只生成配置，不装包/不重启服务（用于校验）
+#   VM_IP=10.77.0.2        隧道本机 IP
+#   LAN_IF=br-lan          OpenWrt LAN 网卡名（仅备注/兼容旧脚本）
+#   KEEPALIVE=25           对端心跳秒数
+#   SKIP_INSTALL=1         跳过 opkg 装包（内核模块/工具已自带时用）
+#   DRY_RUN=1              只生成配置，不重载网络/防火墙（用于校验）
 # ============================================================
-set -eu
+set -u
 
 # 子命令：查询本机隧道配置（不改动任何配置）
 case "${1:-}" in
   show-keys|keys|show)
-    CONF=/etc/wireguard/wg0.conf
-    if [ ! -f "$CONF" ]; then
-      echo "未找到 $CONF，请先运行本脚本完成部署" >&2
-      exit 1
-    fi
-    echo "== 本机 WireGuard 隧道配置 =="
-    grep -E '^(Address|PrivateKey|Endpoint|PublicKey) =' "$CONF"
+    echo "== 本机 WireGuard 隧道配置（netifd /etc/config/network） =="
+    uci show network.wg0 2>/dev/null
+    uci show network.wg0peer 2>/dev/null
     if command -v wg >/dev/null 2>&1; then
-      PRIV=$(sed -n 's/^PrivateKey = //p' "$CONF")
-      echo "本机公钥 = $(echo "$PRIV" | wg pubkey)"
+      PRIV=$(uci -q get network.wg0.private_key)
+      [ -n "$PRIV" ] && echo "本机公钥 = $(echo "$PRIV" | wg pubkey)"
     fi
     exit 0
     ;;
@@ -59,8 +58,10 @@ if [ -z "${LAN_IF:-}" ]; then
   printf "请输入 LAN 网卡名 [br-lan]: "; read LAN_IF
   LAN_IF=${LAN_IF:-br-lan}
 fi
+KEEPALIVE=${KEEPALIVE:-25}
 
 SERVER_ENDPOINT="${SERVER_HOST}:${SERVER_PORT}"
+PEER_IP="${VM_IP%.*}.1"
 
 if [ -z "$SERVER_PUBLIC_KEY" ] || [ -z "$VM_PRIVATE_KEY" ]; then
   echo "错误：SERVER_PUBLIC_KEY 和 VM_PRIVATE_KEY 不能为空" >&2
@@ -69,131 +70,108 @@ fi
 
 echo "==> 参数确认"
 echo "  VPS 端点 : $SERVER_ENDPOINT"
-echo "  隧道 IP  : $VM_IP"
+echo "  隧道 IP  : $VM_IP  (对端 $PEER_IP)"
 echo "  LAN 网卡 : $LAN_IF"
 echo
 
 DRY_RUN=${DRY_RUN:-0}
 
-echo "==> 1/4 安装 WireGuard 组件"
+# ---- 2. 安装 WireGuard 组件（可选） ----
+echo "==> 1/4 检查 WireGuard 组件"
 if [ "$DRY_RUN" = "1" ]; then
   echo "[DRY_RUN] 跳过 opkg update / install"
 elif [ "${SKIP_INSTALL:-0}" = "1" ]; then
-  if ! command -v wg >/dev/null 2>&1; then
-    echo "错误：SKIP_INSTALL=1 但未找到 wg，请先手动安装 kmod-wireguard / wireguard-tools" >&2
-    exit 1
-  fi
-  if command -v wg-quick >/dev/null 2>&1; then
-    echo "[SKIP_INSTALL] 跳过软件包安装（已检测到 wg / wg-quick）"
-  else
-    echo "[SKIP_INSTALL] 未检测到 wg-quick，将使用手动方式拉起隧道"
-  fi
+  echo "[SKIP_INSTALL] 跳过软件包安装"
 else
-  opkg update
-  opkg install kmod-wireguard wireguard-tools luci-proto-wireguard
+  opkg update || echo "警告: opkg update 失败（源不可达则用 SKIP_INSTALL=1 跳过）"
+  opkg install kmod-wireguard wireguard-tools luci-proto-wireguard || \
+    echo "警告: opkg install 失败；若内核模块已在可忽略"
 fi
 
-echo "==> 2/4 写入 wg0 配置"
-mkdir -p /etc/wireguard
-cat > /etc/wireguard/wg0.conf <<EOF
-[Interface]
-Address = ${VM_IP}/24
-PrivateKey = ${VM_PRIVATE_KEY}
-PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o ${LAN_IF} -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o ${LAN_IF} -j MASQUERADE
+if [ ! -f /lib/netifd/proto/wireguard.sh ]; then
+  echo "错误: 未找到 /lib/netifd/proto/wireguard.sh，netifd 无法托管 wireguard 接口" >&2
+  echo "      请先安装 luci-proto-wireguard / kmod-wireguard 后重试" >&2
+  exit 1
+fi
 
-[Peer]
-PublicKey = ${SERVER_PUBLIC_KEY}
-Endpoint = ${SERVER_ENDPOINT}
-AllowedIPs = 10.77.0.1/32
-PersistentKeepalive = 25
+# ---- 3. 写入 netifd 原生 wg0 接口与对端 ----
+echo "==> 2/4 写入 netifd wg0 配置"
+uci -q delete network.wg0peer || true
+uci -q delete network.wg0 || true
+
+uci set network.wg0=interface
+uci set network.wg0.proto='wireguard'
+uci -q delete network.wg0.addresses || true
+uci add_list network.wg0.addresses="${VM_IP}/24"
+uci set network.wg0.private_key="${VM_PRIVATE_KEY}"
+uci set network.wg0.mtu='1420'
+
+uci set network.wg0peer=wireguard_wg0
+uci set network.wg0peer.public_key="${SERVER_PUBLIC_KEY}"
+uci set network.wg0peer.endpoint_host="${SERVER_HOST}"
+uci set network.wg0peer.endpoint_port="${SERVER_PORT}"
+uci -q delete network.wg0peer.allowed_ips || true
+uci add_list network.wg0peer.allowed_ips="${PEER_IP}/32"
+uci set network.wg0peer.persistent_keepalive="${KEEPALIVE}"
+
+if [ "$DRY_RUN" != "1" ]; then
+  uci commit network
+  echo "已写入 /etc/config/network（interface wg0 + peer wg0peer）"
+else
+  echo "[DRY_RUN] 未 commit network"
+fi
+
+# ---- 4. 防火墙：wg0/zt 网卡加入 lan 区域 + 持久化 include 放行 ----
+echo "==> 3/4 配置防火墙放行"
+LAN_ZONE=$(uci show firewall | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='lan'$/\1/p" | head -1)
+if [ -n "$LAN_ZONE" ]; then
+  uci -q del_list firewall.${LAN_ZONE}.network='wg0' || true
+  uci add_list firewall.${LAN_ZONE}.network='wg0'
+  echo "    wg0 已加入 lan 区域"
+else
+  echo "    未找到 lan 区域，跳过 zone 归属（靠 include 兜底）"
+fi
+
+cat > /etc/firewall.wg-zt.sh <<'EOF'
+#!/bin/sh
+for n in /sys/class/net/zt* /sys/class/net/wg0; do
+  [ -e "$n" ] || continue
+  n=$(basename "$n")
+  nft insert rule inet fw4 input iifname "$n" accept 2>/dev/null || true
+  nft insert rule inet fw4 forward iifname "$n" accept 2>/dev/null || true
+done
 EOF
-chmod 600 /etc/wireguard/wg0.conf
-echo "已写入 /etc/wireguard/wg0.conf"
+chmod +x /etc/firewall.wg-zt.sh
 
-# 拉起隧道：优先 wg-quick；缺失时手动创建接口并加载精简配置
-# （wg setconf 不识别 Address/PostUp/PostDown/DNS 等 wg-quick 专属行）
-PEER_IP="${VM_IP%.*}.1"
-wg_start() {
-  if command -v wg-quick >/dev/null 2>&1; then
-    wg-quick up wg0
-    return 0
-  fi
-  ip link del wg0 2>/dev/null || true
-  ip link add wg0 type wireguard
-  ip addr add ${VM_IP}/24 dev wg0
-  awk '!/^[[:space:]]*(Address|PostUp|PostDown|DNS)[[:space:]]*=/' \
-    /etc/wireguard/wg0.conf > /tmp/wg0-nolink.conf
-  wg setconf wg0 /tmp/wg0-nolink.conf
-  ip link set wg0 up
-  ip route replace ${PEER_IP}/32 dev wg0
-  iptables -A FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
-  iptables -t nat -A POSTROUTING -o ${LAN_IF} -j MASQUERADE 2>/dev/null || true
-}
+uci -q delete firewall.wgztinc || true
+uci set firewall.wgztinc=include
+uci set firewall.wgztinc.type='script'
+uci set firewall.wgztinc.path='/etc/firewall.wg-zt.sh'
 
-wg_stop() {
-  if command -v wg-quick >/dev/null 2>&1; then
-    wg-quick down wg0
-    return 0
-  fi
-  iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
-  iptables -t nat -D POSTROUTING -o ${LAN_IF} -j MASQUERADE 2>/dev/null || true
-  ip link del wg0 2>/dev/null || true
-}
-
-echo "==> 3/4 防火墙放行 wg0"
 if [ "$DRY_RUN" != "1" ]; then
-  uci -q add_list firewall.lan.network='wg0'
-  uci commit firewall || echo "警告: uci commit firewall 返回非零，继续后续步骤"
-  /etc/init.d/firewall restart || echo "警告: 防火墙重启返回非零，继续后续步骤"
+  uci commit firewall
+  /etc/init.d/network reload || echo "警告: network reload 返回非零"
+  /etc/init.d/firewall restart || echo "警告: 防火墙重启返回非零"
+  ifup wg0 2>/dev/null || /sbin/ifup wg0 2>/dev/null || true
 else
-  echo "[DRY_RUN] 跳过 uci 写入与防火墙重启"
+  echo "[DRY_RUN] 未 commit firewall，未重载服务"
 fi
 
-echo "==> 4/4 配置开机自启并启动隧道"
-cat > /etc/init.d/wg0 <<INIT
-#!/bin/sh /etc/rc.common
-START=99
-STOP=10
-WG_IP=${VM_IP}
-PEER_IP=${PEER_IP}
-CONF=/etc/wireguard/wg0.conf
-start() {
-    if command -v wg-quick >/dev/null 2>&1; then
-        wg-quick up wg0
-    else
-        ip link add wg0 type wireguard 2>/dev/null
-        ip addr add \${WG_IP}/24 dev wg0 2>/dev/null
-        awk '!/^[[:space:]]*(Address|PostUp|PostDown|DNS)[[:space:]]*=/' "\$CONF" > /tmp/wg0-nolink.conf
-        wg setconf wg0 /tmp/wg0-nolink.conf
-        ip link set wg0 up
-        ip route replace \${PEER_IP}/32 dev wg0
-    fi
-}
-stop() {
-    if command -v wg-quick >/dev/null 2>&1; then
-        wg-quick down wg0
-    else
-        ip link del wg0 2>/dev/null
-    fi
-}
-INIT
-chmod +x /etc/init.d/wg0
-
+# ---- 5. 自检 ----
+echo "==> 4/4 自检"
 if [ "$DRY_RUN" != "1" ]; then
-  /etc/init.d/wg0 enable || echo "警告: 开机自启注册返回非零"
-  wg_start || true
-else
-  echo "[DRY_RUN] 跳过开机自启与隧道启动"
+  sleep 2
+  echo "-- wg0 状态 --"
+  ip addr show wg0 2>/dev/null || echo "    wg0 接口尚未出现"
+  command -v wg >/dev/null 2>&1 && wg show wg0 || true
+  echo "-- ping 隧道对端 $PEER_IP --"
+  if ping -c 3 -W 3 "$PEER_IP"; then
+    echo "隧道已通。回 VPS 上 wg show 应能看到握手记录。"
+  else
+    echo "隧道不通：检查 Endpoint 可达性、密钥是否填反、${SERVER_PORT}/UDP 是否放行。"
+  fi
 fi
 
 echo
 echo "==================== 部署完成 ===================="
-echo "自检：ping -c 3 10.77.0.1"
-if [ "$DRY_RUN" != "1" ]; then
-  if ping -c 3 10.77.0.1; then
-    echo "隧道已通。回 VPS 上 wg show 应能看到握手记录。"
-  else
-    echo "隧道不通：检查 Endpoint 可达性、密钥是否填反、51820/UDP 是否放行。"
-  fi
-fi
+echo "复查命令：sh $0 show-keys"

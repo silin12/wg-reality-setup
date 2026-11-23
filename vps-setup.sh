@@ -141,11 +141,22 @@ cat > "$XRAY_CONF" <<EOF
     }
   ],
   "outbounds": [
-    { "protocol": "freedom", "tag": "direct" }
+    {
+      "protocol": "freedom",
+      "tag": "direct",
+      "settings": {
+        "finalRules": [
+          { "action": "allow", "ip": ["${VMLAN}", "${WG_NET}"] }
+        ],
+        "firewall": [
+          { "action": "allow", "ip": ["${VMLAN}", "${WG_NET}"] }
+        ]
+      }
+    }
   ],
   "routing": {
     "rules": [
-      { "type": "field", "ip": ["${VMLAN}"], "outboundTag": "direct" }
+      { "type": "field", "ip": ["${VMLAN}", "${WG_NET}"], "outboundTag": "direct" }
     ]
   }
 }

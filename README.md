@@ -13,11 +13,18 @@ VPS 38.22.94.13 (ens17)
    ▼  WireGuard 隧道
 国外 OpenWrt VM (bridge)
    ├─ wg0 10.77.0.2/24
-   └─ 出口到它自己的内网 LAN：192.168.10.0/24  ← 占位，按实际网段改
+   └─ 出口到它自己的内网 LAN：192.168.4.0/24（本次实测；占位 192.168.10.0/24，按实际网段改）
 ```
 
-- 中国侧连 VPS 的 5678；要访问国外 VM 内网时，客户端把 `192.168.10.0/24` 路由走代理，VPS 经 WireGuard 送到 VM。
+- 中国侧连 VPS 的 5678；要访问国外 VM 内网时，客户端把 `192.168.4.0/24` 路由走代理，VPS 经 WireGuard 送到 VM。
 - 不做「全局从 VM 出口」：默认流量从 VPS 自己出网；只把目标是国外网段的流量甩给 WireGuard。要全局走 VM 出口需要另外在 VPS 上改默认路由 + SNAT，风险高，本方案不做。
+
+## 关键实现要点（实测已验证）
+
+1. **OpenWrt 隧道用 netifd 原生 wireguard 协议**（`/etc/config/network` 里 `interface wg0` + `wireguard_wg0` peer），不依赖 `wg-quick`；部分固件只装了一半 wireguard-tools、没有 `wg-quick`，netifd 方式可正常开机自启。
+2. **Xray 26.x freedom 出站默认拦截私有网段**（RFC1918），会把到 `192.168.4.0/24`、`10.77.0.0/24` 的连接直接黑洞。`vps-setup.sh` 在 direct 出站注入 `finalRules` / `firewall` Allow 规则放行这两个网段（两种键名兼容新旧 Xray）。
+3. **OpenWrt 防火墙持久化放行**：`wg0` 加入 lan 区域；另注册 fw4 script include（`/etc/firewall.wg-zt.sh`），防火墙每次重载自动对 `zt*`、`wg0` 网卡插入 input/forward accept，避免手动 `nft insert` 在重载后丢失。
+4. 排障辅助脚本：`openwrt-fix-access.sh`（修复 ZT/WG 本机访问被拒）、`openwrt-diag.sh`（监听端口、zone/include、nft 链、进程、网卡自检）。
 
 ## 一键脚本
 
@@ -64,9 +71,10 @@ SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.
 | `SERVER_PUBLIC_KEY` | （必填） | VPS WireGuard 公钥 |
 | `VM_PRIVATE_KEY` | （必填） | 本机 WireGuard 私钥 |
 | `VM_IP` | `10.77.0.2` | 隧道本机 IP |
-| `LAN_IF` | `br-lan` | OpenWrt LAN 网卡名 |
+| `LAN_IF` | `br-lan` | OpenWrt LAN 网卡名（备注用，netifd 方式不依赖） |
+| `KEEPALIVE` | `25` | 对端心跳秒数 |
 | `SKIP_INSTALL` | `0` | 设 `1` 跳过 opkg 装包（内核模块/工具已自带时用） |
-| `DRY_RUN` | `0` | 设 `1` 只生成配置，不装包/不重启服务，用于校验 |
+| `DRY_RUN` | `0` | 设 `1` 只生成配置，不重载网络/防火墙，用于校验 |
 
 ### 事后查询密钥
 
@@ -111,7 +119,7 @@ sh /tmp/openwrt-setup.sh show-keys
 
 1. VPS：跑 `server/wireguard.sh`，拿到 VM 需要的公钥
 2. VPS：装 Xray，填 `server/xray-config.json`，systemd 起服务
-3. 国外 VM：装 `kmod-wireguard wireguard-tools luci-proto-wireguard`，填 `openwrt/wg0.conf`，起 wg0，放行转发与 NAT
+3. 国外 VM：装 `kmod-wireguard wireguard-tools luci-proto-wireguard`，脚本写入 netifd `wg0` 接口与 peer，开机自启并放行 wg0/zt 网卡
 4. 验证：VPS `ping 10.77.0.2`；VM `ping 10.77.0.1`；从 VPS `ping 192.168.10.x`
 5. 中国侧：导入 vless 链接，把国外内网段加到代理路由规则
 
@@ -141,7 +149,8 @@ vless://<UUID>@38.22.94.13:5678?security=reality&sni=www.microsoft.com&fp=chrome
 
 ## 中国侧客户端路由
 
-- 默认：访问国外 VM 内网时，把 `192.168.10.0/24` 加进「走代理」规则；其余流量直连
+- 默认：访问国外 VM 内网时，把 `192.168.4.0/24` 加进「走代理」规则；其余流量直连
+- **v2rayN 注意**：该规则要排在「绕过局域网 IP（geoip:private）」之前，否则私网地址会被直连规则抢先命中；示例出站规则：`ip = 192.168.4.0/24 → proxy`
 - 想整体走 VPS 出口：客户端开全局模式（注意这时出口是 VPS 所在地，不是 VM）
 - 手机端 Karing / v2rayNG；Windows 端 Karing 桌面版 / v2rayN，导入链接即可
 
