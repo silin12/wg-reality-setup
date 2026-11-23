@@ -32,12 +32,31 @@ bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/mai
 
 跑完输出两段东西：中国侧客户端 vless 链接，以及 `SERVER_PUBLIC_KEY`、`VM_PRIVATE_KEY` 两个值。
 
-**第二步：在国外 OpenWrt VM 上跑**（先下载，再把上一步两个值填进去；ash 不支持进程替换）
+**第二步：在国外 OpenWrt VM 上跑**（先下载；脚本会逐项提示输入 VPS IP、端口、密钥，直接回车走默认值）
 
 ```sh
 wget -O /tmp/openwrt-setup.sh https://raw.githubusercontent.com/silin12/wg-reality-setup/main/openwrt-setup.sh
+sh /tmp/openwrt-setup.sh
+```
+
+也支持环境变量预填、非交互执行：
+
+```sh
+SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
 SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.sh
 ```
+
+### OpenWrt 脚本参数
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `SERVER_HOST` | `38.22.94.13` | VPS 公网 IP（交互时提示输入） |
+| `SERVER_PORT` | `51820` | VPS WireGuard 端口（交互时提示输入） |
+| `SERVER_PUBLIC_KEY` | （必填） | VPS WireGuard 公钥 |
+| `VM_PRIVATE_KEY` | （必填） | 本机 WireGuard 私钥 |
+| `VM_IP` | `10.77.0.2` | 隧道本机 IP |
+| `LAN_IF` | `br-lan` | OpenWrt LAN 网卡名 |
+| `DRY_RUN` | `0` | 设 `1` 只生成配置，不装包/不重启服务，用于校验 |
 
 > GitHub 仓库：`silin12/wg-reality-setup`，根目录 `vps-setup.sh`（VPS）、`openwrt-setup.sh`（OpenWrt VM）。手工拆分的模板仍在 `server/`、`openwrt/` 目录备查。
 
@@ -76,11 +95,11 @@ SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.
 ## VPS 上 Xray 安装与出客户端链接
 
 ```sh
-# 1. 安装 Xray（官方脚本，装到 /usr/local/xray）
+# 1. 安装 Xray（官方脚本，装到 /usr/local/bin/xray）
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
 # 2. 生成 REALITY 密钥对，私钥填 config，公钥给客户端
-/usr/local/xray/xray x25519
+/usr/local/bin/xray x25519
 
 # 3. 生成 UUID 与 shortId
 cat /proc/sys/kernel/random/uuid
