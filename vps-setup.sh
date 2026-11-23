@@ -16,7 +16,7 @@ WG_PORT=${WG_PORT:-51820}
 WG_NET=10.77.0.0/24
 WG_VPS_IP=10.77.0.1/24
 WG_VM_IP=10.77.0.2
-VMLAN=${VMLAN:-192.168.10.0/24}
+VMLAN=${VMLAN:-}
 WAN_IF=${WAN_IF:-ens17}
 REALITY_PORT=${REALITY_PORT:-5678}
 SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-38.22.94.13}
@@ -34,7 +34,7 @@ case "${1:-}" in
       exit 1
     fi
     echo "== WireGuard 密钥（OpenWrt 端部署时填） =="
-    grep -E '^(SERVER_PUBLIC_KEY|VM_PRIVATE_KEY|VM_IP)=' "$KEYS_FILE"
+    grep -E '^(SERVER_PUBLIC_KEY|VM_PRIVATE_KEY|VM_IP|VMLAN)=' "$KEYS_FILE"
     LINK_FILE=/etc/wireguard/client-link.txt
     if [ -f "$LINK_FILE" ]; then
       echo
@@ -44,6 +44,12 @@ case "${1:-}" in
     exit 0
     ;;
 esac
+
+# 收集国外 OpenWrt 内网网段（环境变量优先，缺则提示输入）
+if [ -z "$VMLAN" ]; then
+  printf "请输入国外 OpenWrt 内网网段 [192.168.10.0/24]: "; read VMLAN
+  VMLAN=${VMLAN:-192.168.10.0/24}
+fi
 
 echo "==> 1/6 安装依赖"
 export DEBIAN_FRONTEND=noninteractive
@@ -86,6 +92,7 @@ EOF
 SERVER_PUBLIC_KEY=${SERVER_PUB}
 VM_PRIVATE_KEY=${VM_PRIV}
 VM_IP=${WG_VM_IP}
+VMLAN=${VMLAN}
 EOF
   umask 022
 fi
