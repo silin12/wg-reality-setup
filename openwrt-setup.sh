@@ -79,7 +79,11 @@ echo "==> 1/4 安装 WireGuard 组件"
 if [ "$DRY_RUN" = "1" ]; then
   echo "[DRY_RUN] 跳过 opkg update / install"
 elif [ "${SKIP_INSTALL:-0}" = "1" ]; then
-  echo "[SKIP_INSTALL] 跳过软件包安装（假定 kmod-wireguard / wireguard-tools 已装）"
+  if ! command -v wg >/dev/null 2>&1 || ! command -v wg-quick >/dev/null 2>&1; then
+    echo "错误：SKIP_INSTALL=1 但未找到 wg / wg-quick，请去掉 SKIP_INSTALL 正常装包，或先手动安装 wireguard-tools" >&2
+    exit 1
+  fi
+  echo "[SKIP_INSTALL] 跳过软件包安装（已检测到 wg / wg-quick）"
 else
   opkg update
   opkg install kmod-wireguard wireguard-tools luci-proto-wireguard
