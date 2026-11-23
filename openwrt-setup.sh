@@ -1,31 +1,68 @@
 #!/bin/sh
 # ============================================================
-# 一键脚本：国外 OpenWrt VM 侧
+# 一键脚本：国外 OpenWrt VM 侧（交互输入 VPS 地址/端口与密钥）
 # 作用：装 WireGuard 客户端配置，拨入 VPS 隧道，放行转发与 NAT
-# 用法（先在 VPS 跑完 vps-setup.sh，拿到两个密钥后）：
-#   SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh openwrt-setup.sh
+#
+# 用法一（交互式，逐项提示输入）：
+#   sh openwrt-setup.sh
+#
+# 用法二（环境变量预填，非交互）：
+#   SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
+#   SERVER_PUBLIC_KEY=xxx VM_PRIVATE_KEY=xxx sh openwrt-setup.sh
+#
 # 可选环境变量：
-#   SERVER_ENDPOINT=38.22.94.13:51820
-#   VM_IP=10.77.0.2
-#   LAN_IF=br-lan
+#   VM_IP=10.77.0.2     隧道本机 IP
+#   LAN_IF=br-lan       OpenWrt LAN 网卡名
+#   DRY_RUN=1           只生成配置，不装包/不重启服务（用于校验）
 # ============================================================
 set -eu
 
-SERVER_ENDPOINT=${SERVER_ENDPOINT:-38.22.94.13:51820}
-SERVER_PUBLIC_KEY=${SERVER_PUBLIC_KEY:-}
-VM_PRIVATE_KEY=${VM_PRIVATE_KEY:-}
-VM_IP=${VM_IP:-10.77.0.2}
-LAN_IF=${LAN_IF:-br-lan}
+# ---- 1. 收集参数：环境变量优先，缺什么提示输入 ----
+if [ -z "${SERVER_HOST:-}" ]; then
+  printf "请输入 VPS IP [38.22.94.13]: "; read SERVER_HOST
+  SERVER_HOST=${SERVER_HOST:-38.22.94.13}
+fi
+if [ -z "${SERVER_PORT:-}" ]; then
+  printf "请输入 VPS WireGuard 端口 [51820]: "; read SERVER_PORT
+  SERVER_PORT=${SERVER_PORT:-51820}
+fi
+if [ -z "${SERVER_PUBLIC_KEY:-}" ]; then
+  printf "请输入 VPS WireGuard 公钥（SERVER_PUBLIC_KEY）: "; read SERVER_PUBLIC_KEY
+fi
+if [ -z "${VM_PRIVATE_KEY:-}" ]; then
+  printf "请输入本机 WireGuard 私钥（VM_PRIVATE_KEY）: "; read VM_PRIVATE_KEY
+fi
+if [ -z "${VM_IP:-}" ]; then
+  printf "请输入隧道本机 IP [10.77.0.2]: "; read VM_IP
+  VM_IP=${VM_IP:-10.77.0.2}
+fi
+if [ -z "${LAN_IF:-}" ]; then
+  printf "请输入 LAN 网卡名 [br-lan]: "; read LAN_IF
+  LAN_IF=${LAN_IF:-br-lan}
+fi
+
+SERVER_ENDPOINT="${SERVER_HOST}:${SERVER_PORT}"
 
 if [ -z "$SERVER_PUBLIC_KEY" ] || [ -z "$VM_PRIVATE_KEY" ]; then
-  echo "缺少参数：先在 VPS 跑完 vps-setup.sh，然后执行："
-  echo "  SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh openwrt-setup.sh"
+  echo "错误：SERVER_PUBLIC_KEY 和 VM_PRIVATE_KEY 不能为空" >&2
   exit 1
 fi
 
+echo "==> 参数确认"
+echo "  VPS 端点 : $SERVER_ENDPOINT"
+echo "  隧道 IP  : $VM_IP"
+echo "  LAN 网卡 : $LAN_IF"
+echo
+
+DRY_RUN=${DRY_RUN:-0}
+
 echo "==> 1/4 安装 WireGuard 组件"
-opkg update
-opkg install kmod-wireguard wireguard-tools luci-proto-wireguard
+if [ "$DRY_RUN" != "1" ]; then
+  opkg update
+  opkg install kmod-wireguard wireguard-tools luci-proto-wireguard
+else
+  echo "[DRY_RUN] 跳过 opkg update / install"
+fi
 
 echo "==> 2/4 写入 wg0 配置"
 mkdir -p /etc/wireguard
@@ -43,11 +80,16 @@ AllowedIPs = 10.77.0.1/32
 PersistentKeepalive = 25
 EOF
 chmod 600 /etc/wireguard/wg0.conf
+echo "已写入 /etc/wireguard/wg0.conf"
 
 echo "==> 3/4 防火墙放行 wg0"
-uci -q add_list firewall.lan.network='wg0'
-uci commit firewall
-/etc/init.d/firewall restart
+if [ "$DRY_RUN" != "1" ]; then
+  uci -q add_list firewall.lan.network='wg0'
+  uci commit firewall
+  /etc/init.d/firewall restart
+else
+  echo "[DRY_RUN] 跳过 uci 写入与防火墙重启"
+fi
 
 echo "==> 4/4 配置开机自启并启动隧道"
 cat > /etc/init.d/wg0 <<'INIT'
@@ -58,16 +100,21 @@ start() { wg-quick up wg0 }
 stop()  { wg-quick down wg0 }
 INIT
 chmod +x /etc/init.d/wg0
-/etc/init.d/wg0 enable
 
-wg-quick up wg0 || true
+if [ "$DRY_RUN" != "1" ]; then
+  /etc/init.d/wg0 enable
+  wg-quick up wg0 || true
+else
+  echo "[DRY_RUN] 跳过开机自启与隧道启动"
+fi
 
 echo
 echo "==================== 部署完成 ===================="
-echo "自检："
-echo "  ping -c 3 10.77.0.1"
-if ping -c 3 10.77.0.1; then
-  echo "隧道已通。回到 VPS 侧 ping 内网设备验证：ping <${VMLAN:-192.168.10.0/24} 内的 IP>"
-else
-  echo "隧道不通：检查 Endpoint 可达性、SERVER_PUBLIC_KEY / VM_PRIVATE_KEY 是否填反、51820/UDP 是否放行。"
+echo "自检：ping -c 3 10.77.0.1"
+if [ "$DRY_RUN" != "1" ]; then
+  if ping -c 3 10.77.0.1; then
+    echo "隧道已通。回 VPS 上 wg show 应能看到握手记录。"
+  else
+    echo "隧道不通：检查 Endpoint 可达性、密钥是否填反、51820/UDP 是否放行。"
+  fi
 fi
