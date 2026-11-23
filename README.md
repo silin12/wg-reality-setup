@@ -58,6 +58,19 @@ SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.
 | `LAN_IF` | `br-lan` | OpenWrt LAN 网卡名 |
 | `DRY_RUN` | `0` | 设 `1` 只生成配置，不装包/不重启服务，用于校验 |
 
+### 事后查询密钥
+
+部署完成后，随时可以用脚本的 `show-keys` 子命令复查已保存的密钥，不会改动任何配置：
+
+```sh
+# VPS 上查 WireGuard 公钥 / OpenWrt 私钥
+bash /root/vps-setup.sh show-keys
+# 或走 raw：bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh) show-keys
+
+# OpenWrt 上查本机隧道配置（含本机公钥）
+sh /tmp/openwrt-setup.sh show-keys
+```
+
 > GitHub 仓库：`silin12/wg-reality-setup`，根目录 `vps-setup.sh`（VPS）、`openwrt-setup.sh`（OpenWrt VM）。手工拆分的模板仍在 `server/`、`openwrt/` 目录备查。
 
 ## 端口与地址规划
