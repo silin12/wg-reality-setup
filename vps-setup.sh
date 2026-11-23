@@ -25,6 +25,20 @@ REALITY_DEST=${REALITY_DEST:-www.microsoft.com:443}
 XRAY_BIN=/usr/local/bin/xray
 XRAY_CONF=/usr/local/etc/xray/config.json
 
+# 子命令：查询已保存的 WireGuard 密钥（不改动任何配置）
+case "${1:-}" in
+  show-keys|keys|show)
+    KEYS_FILE=/etc/wireguard/keys.env
+    if [ ! -f "$KEYS_FILE" ]; then
+      echo "未找到 $KEYS_FILE，请先运行本脚本完成部署" >&2
+      exit 1
+    fi
+    echo "== WireGuard 密钥（OpenWrt 端部署时填） =="
+    grep -E '^(SERVER_PUBLIC_KEY|VM_PRIVATE_KEY|VM_IP)=' "$KEYS_FILE"
+    exit 0
+    ;;
+esac
+
 echo "==> 1/6 安装依赖"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
@@ -138,9 +152,12 @@ echo
 echo "【中国侧客户端导入链接】"
 echo "$CLIENT_LINK"
 echo
-echo "【OpenWrt 端运行命令（把下面两个值填进去）】"
-echo "SERVER_PUBLIC_KEY=${SERVER_PUB:-$(grep SERVER_PUBLIC_KEY /etc/wireguard/keys.env | cut -d= -f2)}"
-echo "VM_PRIVATE_KEY=${VM_PRIV:-$(grep VM_PRIVATE_KEY /etc/wireguard/keys.env | cut -d= -f2)}"
+echo "【OpenWrt 端部署需要填的两个值】"
+echo "  VPS 公钥 SERVER_PUBLIC_KEY = ${SERVER_PUB:-$(grep SERVER_PUBLIC_KEY /etc/wireguard/keys.env | cut -d= -f2)}"
+echo "  本机私钥 VM_PRIVATE_KEY    = ${VM_PRIV:-$(grep VM_PRIVATE_KEY /etc/wireguard/keys.env | cut -d= -f2)}"
+echo
+echo "  之后随时可在 VPS 上执行以下命令复查这两个值："
+echo "  bash $0 show-keys"
 echo
 echo "【自检】"
 echo "  VPS: ping ${WG_VM_IP}            # 等 OpenWrt 上线后应通"

@@ -17,6 +17,24 @@
 # ============================================================
 set -eu
 
+# 子命令：查询本机隧道配置（不改动任何配置）
+case "${1:-}" in
+  show-keys|keys|show)
+    CONF=/etc/wireguard/wg0.conf
+    if [ ! -f "$CONF" ]; then
+      echo "未找到 $CONF，请先运行本脚本完成部署" >&2
+      exit 1
+    fi
+    echo "== 本机 WireGuard 隧道配置 =="
+    grep -E '^(Address|PrivateKey|Endpoint|PublicKey) =' "$CONF"
+    if command -v wg >/dev/null 2>&1; then
+      PRIV=$(sed -n 's/^PrivateKey = //p' "$CONF")
+      echo "本机公钥 = $(echo "$PRIV" | wg pubkey)"
+    fi
+    exit 0
+    ;;
+esac
+
 # ---- 1. 收集参数：环境变量优先，缺什么提示输入 ----
 if [ -z "${SERVER_HOST:-}" ]; then
   printf "请输入 VPS IP [38.22.94.13]: "; read SERVER_HOST
