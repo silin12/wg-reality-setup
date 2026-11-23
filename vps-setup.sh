@@ -81,8 +81,8 @@ echo "==> 5/6 生成 REALITY 密钥与配置"
 UUID="$(cat /proc/sys/kernel/random/uuid)"
 SHORT_ID="$(openssl rand -hex 8)"
 REALITY_OUT="$($XRAY_BIN x25519)"
-REALITY_PRIV="$(echo "$REALITY_OUT" | sed -n 's/^Private key: //p')"
-REALITY_PUB="$(echo "$REALITY_OUT" | sed -n 's/^Public key: //p')"
+REALITY_PRIV="$(echo "$REALITY_OUT" | sed -n 's/^PrivateKey: //p')"
+REALITY_PUB="$(echo "$REALITY_OUT" | sed -n 's/^Password (PublicKey): //p')"
 
 mkdir -p "$(dirname "$XRAY_CONF")"
 cat > "$XRAY_CONF" <<EOF
