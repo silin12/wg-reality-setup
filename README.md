@@ -56,6 +56,7 @@ SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> sh /tmp/openwrt-setup.
 | `VM_PRIVATE_KEY` | （必填） | 本机 WireGuard 私钥 |
 | `VM_IP` | `10.77.0.2` | 隧道本机 IP |
 | `LAN_IF` | `br-lan` | OpenWrt LAN 网卡名 |
+| `SKIP_INSTALL` | `0` | 设 `1` 跳过 opkg 装包（内核模块/工具已自带时用） |
 | `DRY_RUN` | `0` | 设 `1` 只生成配置，不装包/不重启服务，用于校验 |
 
 ### 事后查询密钥
