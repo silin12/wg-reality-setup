@@ -22,7 +22,7 @@ REALITY_PORT=${REALITY_PORT:-5678}
 SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-38.22.94.13}
 REALITY_SNI=${REALITY_SNI:-www.microsoft.com}
 REALITY_DEST=${REALITY_DEST:-www.microsoft.com:443}
-XRAY_DIR=/usr/local/xray
+XRAY_BIN=/usr/local/bin/xray
 XRAY_CONF=/usr/local/etc/xray/config.json
 
 echo "==> 1/6 安装依赖"
@@ -73,14 +73,14 @@ systemctl enable --now wg-quick@wg0
 wg show
 
 echo "==> 4/6 安装 Xray（如已安装则跳过）"
-if [ ! -x "$XRAY_DIR/xray" ]; then
+if [ ! -x "$XRAY_BIN" ]; then
   bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 fi
 
 echo "==> 5/6 生成 REALITY 密钥与配置"
 UUID="$(cat /proc/sys/kernel/random/uuid)"
 SHORT_ID="$(openssl rand -hex 8)"
-REALITY_OUT="$($XRAY_DIR/xray x25519)"
+REALITY_OUT="$($XRAY_BIN x25519)"
 REALITY_PRIV="$(echo "$REALITY_OUT" | sed -n 's/^Private key: //p')"
 REALITY_PUB="$(echo "$REALITY_OUT" | sed -n 's/^Public key: //p')"
 
