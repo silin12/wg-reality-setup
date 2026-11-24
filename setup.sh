@@ -19,7 +19,7 @@
 #   show-keys    查看密钥与运行状态（只读摘要，不转储完整配置）
 #   show-config  查看完整 xray 配置 JSON（按需调用）
 #   refresh-link  VPS：换 IP 后重建客户端链接
-#   set-endpoint  OpenWrt：更换 wg0 对端地址 / 端口
+#   set-endpoint  OpenWrt：更换 wg0 对端地址 / 端口，可选同步公钥 / 私钥 / 隧道 UUID
 #   uninstall    卸载本方案组件（不动混部的其它服务）
 #   help         显示本帮助
 # ============================================================
@@ -459,27 +459,63 @@ bridge_show_config() {
 }
 
 bridge_set_endpoint() {
-  # 用法: openwrt-setup.sh set-endpoint <新VPS地址或域名> [端口]
+  # 用法: openwrt set-endpoint <新VPS地址或域名> [端口] [VPS公钥] [VM私钥] [隧道UUID]
   NEW_HOST=${1:-}
   NEW_PORT=${2:-$(uci -q get network.wg0peer.endpoint_port)}
   NEW_PORT=${NEW_PORT:-51820}
+  NEW_PUB=${3:-}
+  NEW_PRIV=${4:-}
+  NEW_UUID=${5:-}
   if [ -z "$NEW_HOST" ]; then
-    echo "用法: $0 openwrt set-endpoint <新VPS地址或域名> [端口]" >&2
+    echo "用法: $0 openwrt set-endpoint <新VPS地址或域名> [端口] [VPS公钥] [VM私钥] [隧道UUID]" >&2
     exit 1
   fi
-  PUB=$(uci -q get network.wg0peer.public_key)
-  if [ -z "$PUB" ]; then
+
+  CUR_PUB=$(uci -q get network.wg0peer.public_key)
+  CUR_PRIV=$(uci -q get network.wg0.private_key)
+  CUR_UUID=$(sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' "$RELAY_CONF" 2>/dev/null | head -1)
+  PEER_ALLOWED=$(uci -q get network.wg0peer.allowed_ips)
+  PEER_ALLOWED=${PEER_ALLOWED:-10.77.0.1/32}
+  if [ -z "$CUR_PUB" ]; then
     echo "错误: 未找到 network.wg0peer，请先完成 install" >&2
     exit 1
   fi
 
+  [ -n "$NEW_PUB" ] || NEW_PUB=$CUR_PUB
+  [ -n "$NEW_PRIV" ] || NEW_PRIV=$CUR_PRIV
+  [ -n "$NEW_UUID" ] || NEW_UUID=$CUR_UUID
+
+  if [ -n "$NEW_UUID" ]; then
+    echo "$NEW_UUID" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || {
+      echo "错误: 隧道 UUID 格式不正确（应为 8-4-4-4-12 十六进制）: $NEW_UUID" >&2
+      exit 1
+    }
+  fi
+
   uci set network.wg0peer.endpoint_host="$NEW_HOST"
   uci set network.wg0peer.endpoint_port="$NEW_PORT"
+  uci set network.wg0peer.public_key="$NEW_PUB"
+  uci set network.wg0.private_key="$NEW_PRIV"
   uci commit network
   echo "==> 已持久化 endpoint = ${NEW_HOST}:${NEW_PORT}"
 
+  # relay 配置里的隧道 UUID（仅一处 id）
+  if [ -n "$NEW_UUID" ] && [ -f "$RELAY_CONF" ]; then
+    sed -i "s/\"id\": *\"[^\"]*\"/\"id\": \"$NEW_UUID\"/" "$RELAY_CONF"
+    echo "==> relay 隧道 UUID 已更新"
+  fi
+
   if command -v wg >/dev/null 2>&1; then
-    wg set wg0 peer "$PUB" endpoint "${NEW_HOST}:${NEW_PORT}" 2>/dev/null \
+    # 先摘掉旧 peer，再按新公钥/私钥重建运行态
+    wg set wg0 peer "$CUR_PUB" remove 2>/dev/null || true
+    if [ -n "$NEW_PRIV" ]; then
+      umask 077
+      printf '%s' "$NEW_PRIV" > /tmp/wgpriv.$$
+      wg set wg0 private-key /tmp/wgpriv.$$ 2>/dev/null || true
+      rm -f /tmp/wgpriv.$$
+    fi
+    wg set wg0 peer "$NEW_PUB" endpoint "${NEW_HOST}:${NEW_PORT}" \
+      allowed-ips "$PEER_ALLOWED" persistent-keepalive 25 2>/dev/null \
       && echo "==> 已生效到运行中的 wg0（下一次心跳即重新握手）" \
       || { echo "==> wg set 未生效，重启 wg0"; ifup wg0 2>/dev/null || true; }
     EP=$(wg show wg0 endpoints 2>/dev/null | awk '{print $2}')
@@ -493,6 +529,17 @@ bridge_set_endpoint() {
   else
     ifup wg0 2>/dev/null || true
     echo "==> endpoint: ${NEW_HOST}:${NEW_PORT}"
+  fi
+
+  # 重启 relay 使新 UUID 生效
+  if [ -f "$INIT_FILE" ]; then
+    /etc/init.d/xray-relay restart 2>/dev/null || true
+    echo "==> relay 已重启"
+  fi
+
+  if [ "$NEW_PRIV" != "$CUR_PRIV" ] && command -v wg >/dev/null 2>&1; then
+    NEW_VM_PUB=$(echo "$NEW_PRIV" | wg pubkey 2>/dev/null)
+    echo "==> 注意: 本机私钥已更换，新本机公钥 = ${NEW_VM_PUB}，需在 VPS 端 peer 同步更新"
   fi
 }
 
@@ -820,7 +867,11 @@ bridge_menu_endpoint() {
   esac
   printf "请输入对接端口 [%s]: " "$p"; read -r rp
   [ -n "$rp" ] && p=$rp
-  bridge_set_endpoint "$h" "$p"
+  echo "--- 以下三项回车沿用现有值；换新 VPS 且密钥对变化时再填写 ---"
+  printf "VPS 公钥 SERVER_PUBLIC_KEY（回车沿用）: "; read -r npub
+  printf "本机私钥 VM_PRIVATE_KEY（回车沿用）: "; read -r npriv
+  printf "隧道 UUID（回车沿用）: "; read -r nuuid
+  bridge_set_endpoint "$h" "$p" "$npub" "$npriv" "$nuuid"
 }
 
 # ---------- 入口 ----------
@@ -859,7 +910,7 @@ case "$ROLE" in
       install) bridge_install ;;
       show-keys|keys|show) bridge_show_keys ;;
       show-config|config) bridge_show_config ;;
-      set-endpoint|endpoint|set-ip) bridge_set_endpoint "${3:-}" "${4:-}" ;;
+      set-endpoint|endpoint|set-ip) bridge_set_endpoint "${3:-}" "${4:-}" "${5:-}" "${6:-}" "${7:-}" ;;
       uninstall|remove|rm) bridge_uninstall ;;
       menu) bridge_menu ;;
       help|-h|--help) usage ;;

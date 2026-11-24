@@ -59,7 +59,7 @@ OpenWrt VM（bridge）
 | 编号 | 动作 | VPS 子命令 | OpenWrt 子命令 |
 |---|---|---|---|
 | 1 | 安装 / 部署 | `install` | `install` |
-| 2 | 更换 VPS 中转 IP（直接输入） | `refresh-link [IP]` | `set-endpoint <IP> [端口]` |
+| 2 | 更换 VPS 中转 IP（直接输入，可选同步密钥 / UUID） | `refresh-link [IP]` | `set-endpoint <IP> [端口] [VPS公钥] [VM私钥] [隧道UUID]` |
 | 3 | 查看密钥与运行状态（摘要） | `show-keys` | `show-keys` |
 | 4 | 卸载 | `uninstall` | `uninstall` |
 | — | 查看完整 xray 配置 JSON（按需） | `show-config` | `show-config` |
@@ -142,7 +142,7 @@ sh setup.sh openwrt set-endpoint <新IP> [51820]
 ```
 
 - VPS 本机监听均为 `0.0.0.0` / 隧道内网地址，WG peer 支持漫游，VPS 侧无需改配置；只需确认新 IP 的防火墙放行 TCP `5678`、UDP `51820`。
-- 菜单里选「更换中转 IP」后先输入新 IP（可在 IP 后直接写 `:端口`），再弹一次端口确认（默认 `51820`，回车沿用）；VPS 回车则自动探测本机公网 IP。`set-endpoint` 同时写持久化 UCI 并下发到运行中的 `wg0`，`refresh-link` 只更新 `/etc/wireguard/client-link.txt`，不动 xray 配置与隧道密钥；改完只回显 endpoint 与握手状态，不打印整份配置。
+- 菜单里选「更换中转 IP」后先输入新 IP（可在 IP 后直接写 `:端口`），再确认端口（默认 `51820`，回车沿用）；随后依次询问 VPS 公钥、本机私钥、隧道 UUID，**三项回车即沿用现有值**，只有换新 VPS 且密钥对/UUID 重新生成时才填写新值。`set-endpoint` 同时写持久化 UCI、更新 relay 配置里的隧道 UUID 并下发到运行中的 `wg0`，最后重启 relay；`refresh-link` 只更新 `/etc/wireguard/client-link.txt`，不动 xray 配置与隧道密钥。若更换了本机私钥，脚本会提示新本机公钥，需在 VPS 端把 peer 公钥同步更新。
 
 ### 卸载
 
