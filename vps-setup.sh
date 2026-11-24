@@ -6,13 +6,14 @@
 #   实际出网由 VM bridge 的 freedom 走它自己的本地宽带上行，VPS 只做中继。
 #
 # 子命令：
-#   install      部署 WireGuard 服务端 + Xray portal（默认）
+#   install      部署 WireGuard 服务端 + Xray portal（默认进编号菜单）
 #   show-keys    查看已保存的密钥 / 隧道参数 / 客户端链接（只读）
 #   refresh-link 换 IP 后重建客户端链接（密钥 / 端口 / 配置不变）
 #   uninstall    停止并卸载 portal 与 wg0 隧道（保留 xray 二进制，除非 PURGE_XRAY=1）
 #   help         显示本帮助
 #
 # 用法：
+#   bash vps-setup.sh                 # 进入主菜单（1安装 2查询 3改IP 4卸载 0退出）
 #   bash vps-setup.sh [install|show-keys|refresh-link [新IP]|uninstall|help]
 #
 # 可选环境变量（install 时生效）：
@@ -43,7 +44,7 @@ KEYS_FILE=/etc/wireguard/keys.env
 LINK_FILE=/etc/wireguard/client-link.txt
 
 usage() {
-  sed -n '2,24p' "$0"
+  sed -n '2,27p' "$0"
 }
 
 show_keys() {
@@ -62,8 +63,7 @@ show_keys() {
 
 refresh_link() {
   # 用法: vps-setup.sh refresh-link [新公网IP]
-  [ -f "$KEYS_FILE" ] || { echo "未找到 $KEYS_FILE，请先完成部署" >&2; exit 1; }
-  # shellcheck disable=SC1090
+  [ -f "$KEYS_FILE" ] || { echo "未找到 $KEYS_FILE，请先完成部署" >&2; exit 1; }  # shellcheck disable=SC1090
   . "$KEYS_FILE"
 
   # 兜底：旧部署未把客户端参数落 keys.env 时，从现有 portal 配置解析
@@ -82,7 +82,7 @@ refresh_link() {
   fi
   [ -z "${REALITY_PORT:-}" ] && REALITY_PORT=${REALITY_PORT:-5678}
 
-  NEW_IP=${2:-}
+  NEW_IP=${1:-}
   if [ -z "$NEW_IP" ]; then
     NEW_IP=$(curl -s --max-time 5 https://ifconfig.me || true)
     [ -z "$NEW_IP" ] && NEW_IP=$(curl -s --max-time 5 https://api.ip.sb/ip || true)
@@ -143,12 +143,46 @@ do_uninstall() {
   echo "==> 卸载完成"
 }
 
-case "${1:-install}" in
+pause_to_menu() {
+  echo
+  printf "按回车返回主菜单，输入 q 退出: "
+  read -r back || { echo; exit 0; }
+  case "$back" in q|quit|exit) echo "Bye."; exit 0 ;; esac
+}
+
+main_menu() {
+  while true; do
+    clear 2>/dev/null || true
+    echo "=============================================================="
+    echo " WG-Reality Portal · VPS 侧（Debian/Ubuntu）"
+    echo "=============================================================="
+    echo " 1. 安装 / 部署 portal（WireGuard + Xray）"
+    echo " 2. 查看密钥与客户端链接"
+    echo " 3. 更换 VPS IP（重建客户端链接，密钥不变）"
+    echo " 4. 卸载 portal 与 wg0 隧道"
+    echo " 0. 退出"
+    echo "=============================================================="
+    printf "请选择 (0 退出): "
+    read -r opt || { echo; exit 0; }
+    case "$opt" in
+      1) return 0 ;;
+      2) show_keys; pause_to_menu ;;
+      3) refresh_link ""; pause_to_menu ;;
+      4) do_uninstall; pause_to_menu ;;
+      0|q|quit|exit) echo "Bye."; exit 0 ;;
+      *) echo "无此选项，请重新输入"; sleep 1 ;;
+    esac
+  done
+}
+
+case "${1:-}" in
   install) ;;
   show-keys|keys|show) show_keys; exit 0 ;;
-  refresh-link|relink|refresh) refresh_link "$@"; exit 0 ;;
+  refresh-link|relink|refresh) refresh_link "$2"; exit 0 ;;
   uninstall|remove|rm) do_uninstall; exit 0 ;;
+  menu) main_menu ;;
   help|-h|--help) usage; exit 0 ;;
+  "") main_menu ;;
   *) echo "未知子命令: $1" >&2; usage; exit 1 ;;
 esac
 

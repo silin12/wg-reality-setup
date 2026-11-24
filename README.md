@@ -37,6 +37,18 @@ OpenWrt VM（bridge）
 
 ## 一键部署
 
+### 脚本主菜单
+
+两个脚本直接运行即进入统一编号菜单（`1` 安装 / `2` 查询 / `3` 改 IP / `4` 卸载 / `0` 退出），也可用同名子命令非交互调用：
+
+| 编号 | 动作 | VPS 子命令 | OpenWrt 子命令 |
+|---|---|---|---|
+| 1 | 安装 / 部署 | `install` | `install` |
+| 2 | 查看密钥与配置 | `show-keys` | `show-keys` |
+| 3 | 更换 VPS IP | `refresh-link [IP]` | `set-endpoint <IP> [端口]` |
+| 4 | 卸载 | `uninstall` | `uninstall` |
+| 0 | 退出 | — | — |
+
 ### 第一步：VPS 上跑
 
 ```sh

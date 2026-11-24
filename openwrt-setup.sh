@@ -7,14 +7,14 @@
 #     收到的流量用 freedom 直连本机宽带上行出网（出口 = 本机宽带 IP）
 #
 # 子命令：
-#   install      部署 wg0 隧道 + relay bridge（默认）
+#   install      部署 wg0 隧道 + relay bridge（默认进编号菜单）
 #   show-keys    查看本机隧道与 relay 配置（只读）
 #   set-endpoint 更换 VPS 地址/端口（保留密钥、peer 与 relay 配置不动）
 #   uninstall    停止 relay、删除 /etc/xray-relay 与 wg0 配置、清理防火墙归属
 #   help         显示本帮助
 #
-# 用法一（交互式，逐项提示输入）：
-#   sh openwrt-setup.sh
+# 用法一（主菜单，编号选择）：
+#   sh openwrt-setup.sh                 # 1安装 2查询 3改IP 4卸载 0退出
 #
 # 用法二（环境变量预填，非交互）：
 #   SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
@@ -40,7 +40,7 @@ INIT_FILE=/etc/init.d/xray-relay
 FW_INCLUDE=/etc/firewall.wg-zt.sh
 
 usage() {
-  sed -n '2,31p' "$0"
+  sed -n '2,33p' "$0"
 }
 
 show_keys() {
@@ -58,8 +58,8 @@ show_keys() {
 
 set_endpoint() {
   # 用法: openwrt-setup.sh set-endpoint <新VPS地址或域名> [端口]
-  NEW_HOST=${2:-}
-  NEW_PORT=${3:-$(uci -q get network.wg0peer.endpoint_port)}
+  NEW_HOST=${1:-}
+  NEW_PORT=${2:-$(uci -q get network.wg0peer.endpoint_port)}
   NEW_PORT=${NEW_PORT:-51820}
   if [ -z "$NEW_HOST" ]; then
     echo "用法: $0 set-endpoint <新VPS地址或域名> [端口]" >&2
@@ -124,12 +124,53 @@ do_uninstall() {
   echo "==> 卸载完成（ZeroTier 及其余配置未改动）"
 }
 
-case "${1:-install}" in
+pause_to_menu() {
+  echo
+  printf "按回车返回主菜单，输入 q 退出: "
+  read -r back || { echo; exit 0; }
+  case "$back" in q|quit|exit) echo "Bye."; exit 0 ;; esac
+}
+
+menu_set_endpoint() {
+  printf "请输入新 VPS 地址或域名: "; read -r h
+  [ -n "$h" ] || { echo "已取消"; return 0; }
+  printf "端口 [51820]: "; read -r p
+  set_endpoint "$h" "$p"
+}
+
+main_menu() {
+  while true; do
+    clear 2>/dev/null || true
+    echo "=============================================================="
+    echo " WG-Reality Bridge · OpenWrt VM 侧"
+    echo "=============================================================="
+    echo " 1. 安装 / 部署 wg0 隧道 + relay bridge"
+    echo " 2. 查看隧道与 relay 配置"
+    echo " 3. 更换 VPS IP（修改 wg0 对端 endpoint）"
+    echo " 4. 卸载 relay 与 wg0 隧道"
+    echo " 0. 退出"
+    echo "=============================================================="
+    printf "请选择 (0 退出): "
+    read -r opt || { echo; exit 0; }
+    case "$opt" in
+      1) return 0 ;;
+      2) show_keys; pause_to_menu ;;
+      3) menu_set_endpoint; pause_to_menu ;;
+      4) do_uninstall; pause_to_menu ;;
+      0|q|quit|exit) echo "Bye."; exit 0 ;;
+      *) echo "无此选项，请重新输入"; sleep 1 ;;
+    esac
+  done
+}
+
+case "${1:-}" in
   install) ;;
   show-keys|keys|show) show_keys; exit 0 ;;
-  set-endpoint|endpoint|set-ip) set_endpoint "$@"; exit 0 ;;
+  set-endpoint|endpoint|set-ip) set_endpoint "${2:-}" "${3:-}"; exit 0 ;;
   uninstall|remove|rm) do_uninstall; exit 0 ;;
+  menu) main_menu ;;
   help|-h|--help) usage; exit 0 ;;
+  "") main_menu ;;
   *) echo "未知子命令: $1" >&2; usage; exit 1 ;;
 esac
 
