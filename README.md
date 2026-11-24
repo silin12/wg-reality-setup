@@ -25,6 +25,21 @@ OpenWrt VM（bridge）
   └─ freedom → eth1 本地宽带上行（出口 = VM 宽带公网 IP）
 ```
 
+## 部署分工：哪台装什么
+
+| 组件 / 配置 | VPS（`vps-setup.sh`，公网入口/中继） | OpenWrt VM（`openwrt-setup.sh`，内网 bridge） |
+|---|---|---|
+| 系统依赖 | `wireguard-tools`、`curl`、`openssl`、`iptables`；官方 Xray 安装包 | opkg 装 wireguard 内核模块 / kmod、`curl`、`openssl`（已自带可 `SKIP_INSTALL=1`） |
+| WireGuard | 服务端 `wg0` `10.77.0.1`，UDP `51820`，`wg-quick@wg0` 自启 | netifd 原生 `wg0` 客户端 `10.77.0.2`，endpoint 指向 VPS `51820` |
+| Xray 核心 | 系统 `/usr/local/bin/xray` + systemd `xray.service` | 静态二进制 `/etc/xray-relay/xray` + procd `/etc/init.d/xray-relay` 自启/崩溃重启 |
+| 入站 | `terminal` VLESS+REALITY `0.0.0.0:5678`（PC 接入）；`interconn` `10.77.0.1:5679`（反向隧道） | 无公网入站；relay 只经隧道连回 VPS |
+| 出站 / 路由 | freedom `direct` 占位；`terminal → r-tunnel` | `tunnel` 出站 → `10.77.0.1:5679`（`reverse.tag`）；`r-tunnel → freedom` 本机宽带直出 |
+| 网络 / 防火墙 | `ip_forward=1`；iptables FORWARD / SNAT（wg0 PostUp/PostDown） | lan 区域纳管 `wg0`；firewall include 放行 `wg0` / `zt*` |
+| 落盘文件 | `/etc/wireguard/wg0.conf`、`keys.env`、`client-link.txt`、`/usr/local/etc/xray/config.json` | `/etc/config/network`（wg0/wg0peer）、`/etc/xray-relay/`、`/etc/firewall.wg-zt.sh` |
+| 明确不装 | relay bridge、procd、Clash 配置 | 官方 Xray 包、systemd、REALITY 公网入口 |
+
+> PC 侧（v2rayN / Karing）只导入 VPS 生成的 vless 链接，不属于这两个服务端脚本。
+
 ## 关键实现要点（实测已验证，Xray 26.11.9）
 
 1. 用新版 **VLESS Reverse Proxy**：入站用户 / 出站里带 `reverse.tag`。旧版顶层 `reverse.portals / bridges`（v2ray legacy reverse）在 26.x 已被核心移除，不能再照搬老仓库的 `reverse` 段配置。
