@@ -59,8 +59,8 @@ OpenWrt VM（bridge）
 | 编号 | 动作 | VPS 子命令 | OpenWrt 子命令 |
 |---|---|---|---|
 | 1 | 安装 / 部署 | `install` | `install` |
-| 2 | 查看密钥与运行状态（摘要） | `show-keys` | `show-keys` |
-| 3 | 更换 VPS IP | `refresh-link [IP]` | `set-endpoint <IP> [端口]` |
+| 2 | 更换 VPS 中转 IP（直接输入） | `refresh-link [IP]` | `set-endpoint <IP> [端口]` |
+| 3 | 查看密钥与运行状态（摘要） | `show-keys` | `show-keys` |
 | 4 | 卸载 | `uninstall` | `uninstall` |
 | — | 查看完整 xray 配置 JSON（按需） | `show-config` | `show-config` |
 | 0 | 退出 | — | — |

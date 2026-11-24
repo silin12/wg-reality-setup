@@ -373,7 +373,7 @@ echo "【卸载】$0 vps uninstall"
 }
 
 portal_menu_refresh() {
-  printf "请输入新 VPS IP（回车自动探测本机公网 IP）: "; read -r ip
+  printf "请输入新的 VPS 中转 IP（回车自动探测本机公网 IP）: "; read -r ip
   portal_refresh_link "$ip"
 }
 
@@ -384,8 +384,8 @@ vps_menu() {
     echo " WG-Reality Portal · VPS 侧（Debian/Ubuntu）"
     echo "=============================================================="
     echo " 1. 安装 / 部署 portal（WireGuard + Xray）"
-    echo " 2. 查看密钥与客户端链接"
-    echo " 3. 更换 VPS IP（重建客户端链接，密钥不变）"
+    echo " 2. 更换 VPS 中转 IP（重建客户端链接，密钥不变）"
+    echo " 3. 查看密钥与客户端链接"
     echo " 4. 卸载 portal 与 wg0 隧道"
     echo " 0. 退出"
     echo "=============================================================="
@@ -393,8 +393,8 @@ vps_menu() {
     read -r opt || { echo; exit 0; }
     case "$opt" in
       1) portal_install; pause_to_menu ;;
-      2) portal_show_keys; pause_to_menu ;;
-      3) portal_menu_refresh; pause_to_menu ;;
+      2) portal_menu_refresh; pause_to_menu ;;
+      3) portal_show_keys; pause_to_menu ;;
       4) portal_uninstall; pause_to_menu ;;
       0|q|quit|exit) echo "Bye."; exit 0 ;;
       *) echo "无此选项，请重新输入"; sleep 1 ;;
@@ -773,8 +773,8 @@ bridge_menu() {
     echo " WG-Reality Bridge · OpenWrt VM 侧"
     echo "=============================================================="
     echo " 1. 安装 / 部署 wg0 隧道 + relay bridge"
-    echo " 2. 查看隧道与 relay 配置"
-    echo " 3. 更换 VPS IP（修改 wg0 对端 endpoint）"
+    echo " 2. 更换 VPS 中转 IP（修改 wg0 对端 endpoint）"
+    echo " 3. 查看隧道与 relay 状态"
     echo " 4. 卸载 relay 与 wg0 隧道"
     echo " 0. 退出"
     echo "=============================================================="
@@ -782,8 +782,8 @@ bridge_menu() {
     read -r opt || { echo; exit 0; }
     case "$opt" in
       1) bridge_install; pause_to_menu ;;
-      2) bridge_show_keys; pause_to_menu ;;
-      3) bridge_menu_endpoint; pause_to_menu ;;
+      2) bridge_menu_endpoint; pause_to_menu ;;
+      3) bridge_show_keys; pause_to_menu ;;
       4) bridge_uninstall; pause_to_menu ;;
       0|q|quit|exit) echo "Bye."; exit 0 ;;
       *) echo "无此选项，请重新输入"; sleep 1 ;;
@@ -792,7 +792,7 @@ bridge_menu() {
 }
 
 bridge_menu_endpoint() {
-  printf "请输入新 VPS IP 或域名（可带 :端口，回车取消）: "; read -r h
+  printf "请输入新的 VPS 中转 IP（可带 :端口，回车取消）: "; read -r h
   [ -n "$h" ] || { echo "已取消"; return 0; }
   case "$h" in
     *:*) p=${h##*:}; h=${h%:*} ;;
