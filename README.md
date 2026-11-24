@@ -114,7 +114,8 @@ PURGE_XRAY=1 bash vps-setup.sh uninstall
 sh /tmp/openwrt-setup.sh uninstall
 ```
 
-- VPS 的 portal 配置删除前会另存 `config.json.bak-uninstall`；
+- VPS 的 portal 配置删除前会另存 `config.json.bak-uninstall`；脚本靠 `.wg-reality` 标记识别本方案配置，缺标记会跳过 xray 服务/配置删除，避免误删混部的其它实例。
+- **混部 Trojan Panel**：面板跑在 Docker 容器里、自带核心在 `/tpdata/.../bin`，卸载不触碰容器、`/tpdata`、面板/数据库/缓存服务；混部机器上**不要**用 `PURGE_XRAY=1`。
 - OpenWrt 卸载只清理本方案的 relay / wg0 / 防火墙 include，不动 ZeroTier、OpenClash 及其它服务。
 
 ## 端口与地址规划

@@ -61,20 +61,29 @@ show_keys() {
 
 do_uninstall() {
   echo "==> 卸载 VPS portal 与 WireGuard 隧道"
+  echo "    注意: 本脚本只清理本方案组件；不触碰 Docker 容器、/tpdata 与"
+  echo "    Trojan Panel 相关服务（panel / core / dbguard / tpbackup / redis / mariadb / caddy）。"
   if [ "${ASSUME_YES:-0}" != "1" ]; then
-    printf "确认卸载？将停止 xray、删除 portal 配置与 wg0 配置 [y/N]: "
+    printf "确认卸载？将停止本方案 xray portal、删除其配置与 wg0 配置 [y/N]: "
     read -r ans
     [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { echo "已取消"; exit 0; }
   fi
 
-  echo "    停止并禁用 xray 服务"
-  systemctl stop xray 2>/dev/null || true
-  systemctl disable xray 2>/dev/null || true
+  MARKER="${XRAY_CONF}.wg-reality"
+  if [ ! -f "$MARKER" ]; then
+    echo "    警告: 未找到标记 $MARKER，当前 xray 配置可能不属于本方案；"
+    echo "    为避免影响混部的 Trojan Panel，跳过 xray 服务与配置的删除。"
+  else
+    echo "    停止并禁用本方案 xray portal 服务"
+    systemctl stop xray 2>/dev/null || true
+    systemctl disable xray 2>/dev/null || true
 
-  if [ -f "$XRAY_CONF" ]; then
-    cp -a "$XRAY_CONF" "${XRAY_CONF}.bak-uninstall"
-    rm -f "$XRAY_CONF"
-    echo "    已删除 portal 配置（备份: ${XRAY_CONF}.bak-uninstall）"
+    if [ -f "$XRAY_CONF" ]; then
+      cp -a "$XRAY_CONF" "${XRAY_CONF}.bak-uninstall"
+      rm -f "$XRAY_CONF"
+      echo "    已删除 portal 配置（备份: ${XRAY_CONF}.bak-uninstall）"
+    fi
+    rm -f "$MARKER"
   fi
 
   echo "    拆除 wg0 隧道"
@@ -85,7 +94,8 @@ do_uninstall() {
   rm -f /etc/sysctl.d/99-wg-reality.conf
 
   if [ "${PURGE_XRAY:-0}" = "1" ]; then
-    echo "    PURGE_XRAY=1，移除 xray 二进制与服务"
+    echo "    警告: PURGE_XRAY=1 会移除系统 xray 二进制与服务单元；"
+    echo "    混部 Trojan Panel 的机器上请勿使用（面板自带核心在 /tpdata/bin 下，不受影响）。"
     bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove || true
   fi
 
@@ -238,6 +248,9 @@ cat > "$XRAY_CONF" <<EOF
   }
 }
 EOF
+
+# 标记文件：卸载时据此判断该 xray 配置是否属于本方案（混部面板时避免误删）
+printf 'wg-reality portal\nUUID=%s\nTUNNEL_UUID=%s\n' "$UUID" "$TUNNEL_UUID" > "${XRAY_CONF}.wg-reality"
 
 echo "==> 6/6 启动 Xray"
 systemctl enable --now xray
