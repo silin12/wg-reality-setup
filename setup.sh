@@ -16,7 +16,8 @@
 #
 # 子命令（各类别一致）：
 #   install      部署（默认进编号菜单）
-#   show-keys    查看密钥 / 配置（只读）
+#   show-keys    查看密钥与运行状态（只读摘要，不转储完整配置）
+#   show-config  查看完整 xray 配置 JSON（按需调用）
 #   refresh-link  VPS：换 IP 后重建客户端链接
 #   set-endpoint  OpenWrt：更换 wg0 对端地址 / 端口
 #   uninstall    卸载本方案组件（不动混部的其它服务）
@@ -96,6 +97,14 @@ portal_show_keys() {
     echo "== 中国侧客户端 vless 链接 =="
     cat "$LINK_FILE"
   fi
+  echo
+  echo "  xray 服务: $(systemctl is-active xray 2>/dev/null || echo 未知)"
+  echo "  完整配置 : $XRAY_CONF（需要查看时执行: $0 vps show-config）"
+}
+
+portal_show_config() {
+  echo "== portal 完整配置 =="
+  cat "$XRAY_CONF" 2>/dev/null || echo "未部署"
 }
 
 portal_refresh_link() {
@@ -401,15 +410,35 @@ INIT_FILE=/etc/init.d/xray-relay
 FW_INCLUDE=/etc/firewall.wg-zt.sh
 
 bridge_show_keys() {
-  echo "== 本机 WireGuard 隧道配置（netifd /etc/config/network） =="
-  uci show network.wg0 2>/dev/null
-  uci show network.wg0peer 2>/dev/null
+  echo "== WireGuard 隧道 =="
+  echo "  本机 IP   : $(uci -q get network.wg0.addresses)"
+  echo "  对端     : $(uci -q get network.wg0peer.endpoint_host):$(uci -q get network.wg0peer.endpoint_port)"
+  echo "  对端公钥 : $(uci -q get network.wg0peer.public_key)"
   if command -v wg >/dev/null 2>&1; then
     PRIV=$(uci -q get network.wg0.private_key)
-    [ -n "$PRIV" ] && echo "本机公钥 = $(echo "$PRIV" | wg pubkey)"
+    [ -n "$PRIV" ] && echo "  本机公钥 : $(echo "$PRIV" | wg pubkey)"
+    EP=$(wg show wg0 endpoints 2>/dev/null | awk '{print $2}')
+    HS=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}')
+    echo "  当前 endpoint: ${EP:-未连接}"
+    if [ -n "${HS:-}" ] && [ "$HS" != "0" ]; then
+      echo "  最近握手 : epoch $HS"
+    else
+      echo "  最近握手 : 无"
+    fi
   fi
   echo
-  echo "== relay bridge 配置 =="
+  echo "== relay bridge =="
+  [ -x "$RELAY_BIN" ] && echo "  二进制   : $RELAY_BIN 存在" || echo "  二进制   : 缺失"
+  if ps 2>/dev/null | grep -E '[x]ray' >/dev/null 2>&1; then
+    echo "  进程     : 运行中"
+  else
+    echo "  进程     : 未运行"
+  fi
+  echo "  完整配置 : $RELAY_CONF（需要查看时执行: $0 openwrt show-config）"
+}
+
+bridge_show_config() {
+  echo "== relay bridge 完整配置 =="
   cat "$RELAY_CONF" 2>/dev/null || echo "未部署"
 }
 
@@ -794,6 +823,7 @@ case "$ROLE" in
       "") vps_menu ;;
       install) portal_install ;;
       show-keys|keys|show) portal_show_keys ;;
+      show-config|config) portal_show_config ;;
       refresh-link|relink|refresh) portal_refresh_link "${3:-}" ;;
       uninstall|remove|rm) portal_uninstall ;;
       menu) vps_menu ;;
@@ -806,6 +836,7 @@ case "$ROLE" in
       "") bridge_menu ;;
       install) bridge_install ;;
       show-keys|keys|show) bridge_show_keys ;;
+      show-config|config) bridge_show_config ;;
       set-endpoint|endpoint|set-ip) bridge_set_endpoint "${3:-}" "${4:-}" ;;
       uninstall|remove|rm) bridge_uninstall ;;
       menu) bridge_menu ;;
