@@ -138,9 +138,13 @@ fi
 echo "==> 3/5 配置防火墙放行"
 LAN_ZONE=$(uci show firewall | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='lan'$/\1/p" | head -1)
 if [ -n "$LAN_ZONE" ]; then
+  # 确保 lan 网桥与 wg0 都在 lan 区域内：缺 lan 时 fw4 不会生成 br-lan 入站
+  # 放行规则，LAN 客户端的 DHCP Discover 会被默认 drop 策略丢弃，拿不到 IPv4。
+  uci -q del_list firewall.${LAN_ZONE}.network='lan' || true
   uci -q del_list firewall.${LAN_ZONE}.network='wg0' || true
+  uci add_list firewall.${LAN_ZONE}.network='lan'
   uci add_list firewall.${LAN_ZONE}.network='wg0'
-  echo "    wg0 已加入 lan 区域"
+  echo "    lan / wg0 已加入 lan 区域"
 else
   echo "    未找到 lan 区域，跳过 zone 归属（靠 include 兜底）"
 fi
