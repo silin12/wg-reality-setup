@@ -570,6 +570,10 @@ if [ -z "$SERVER_PUBLIC_KEY" ] || [ -z "$VM_PRIVATE_KEY" ] || [ -z "$TUNNEL_UUID
   echo "错误：SERVER_PUBLIC_KEY、VM_PRIVATE_KEY、TUNNEL_UUID 不能为空" >&2
   exit 1
 fi
+echo "$TUNNEL_UUID" | grep -Eq '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' || {
+  echo "错误：TUNNEL_UUID 格式不正确（应为 8-4-4-4-12 十六进制）: $TUNNEL_UUID" >&2
+  exit 1
+}
 
 echo "==> 参数确认"
 echo "  VPS 端点 : $SERVER_ENDPOINT"
