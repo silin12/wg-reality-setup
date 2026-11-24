@@ -5,17 +5,23 @@
 #   PC --VLESS+REALITY:5678--> VPS portal --反向隧道(WG 内网)--> OpenWrt VM bridge
 #   实际出网由 VM bridge 的 freedom 走它自己的本地宽带上行，VPS 只做中继。
 #
-# 作用：装 WireGuard 服务端 + Xray portal（REALITY 入口 + interconn 隧道入站），
-#       生成密钥、UUID、客户端链接与 VM 侧需要的隧道参数。
+# 子命令：
+#   install      部署 WireGuard 服务端 + Xray portal（默认）
+#   show-keys    查看已保存的密钥 / 隧道参数 / 客户端链接（只读）
+#   uninstall    停止并卸载 portal 与 wg0 隧道（保留 xray 二进制，除非 PURGE_XRAY=1）
+#   help         显示本帮助
 #
 # 用法：
-#   bash vps-setup.sh
-# 可选环境变量：
+#   bash vps-setup.sh [install|show-keys|uninstall|help]
+#
+# 可选环境变量（install 时生效）：
 #   VMLAN=192.168.4.0/24          # OpenWrt VM 的内网网段
 #   WAN_IF=ens17                  # VPS 公网网卡
 #   REALITY_PORT=5678             # REALITY 入站端口（PC 连接）
 #   TUNNEL_PORT=5679              # interconn 反向隧道入站（只绑 WG 内网地址）
 #   SERVER_PUBLIC_IP=38.22.94.13  # VPS 公网 IP（写进客户端链接）
+#   ASSUME_YES=1                  # uninstall 跳过确认提示
+#   PURGE_XRAY=1                  # uninstall 时一并删除 xray 二进制与服务
 # ============================================================
 set -euo pipefail
 
@@ -32,30 +38,71 @@ REALITY_SNI=${REALITY_SNI:-www.microsoft.com}
 REALITY_DEST=${REALITY_DEST:-www.microsoft.com:443}
 XRAY_BIN=/usr/local/bin/xray
 XRAY_CONF=/usr/local/etc/xray/config.json
+KEYS_FILE=/etc/wireguard/keys.env
+LINK_FILE=/etc/wireguard/client-link.txt
 
-# 子命令：查询已保存的密钥与隧道参数（不改动任何配置）
-case "${1:-}" in
-  show-keys|keys|show)
-    KEYS_FILE=/etc/wireguard/keys.env
-    if [ ! -f "$KEYS_FILE" ]; then
-      echo "未找到 $KEYS_FILE，请先运行本脚本完成部署" >&2
-      exit 1
-    fi
-    echo "== WireGuard / 反向隧道参数（OpenWrt 端部署时填） =="
-    grep -E '^(SERVER_PUBLIC_KEY|VM_PRIVATE_KEY|VM_IP|VMLAN|TUNNEL_UUID|TUNNEL_PORT|WG_VPS_IP)=' "$KEYS_FILE"
-    LINK_FILE=/etc/wireguard/client-link.txt
-    if [ -f "$LINK_FILE" ]; then
-      echo
-      echo "== 中国侧客户端 vless 链接 =="
-      cat "$LINK_FILE"
-    fi
-    exit 0
-    ;;
+usage() {
+  sed -n '2,24p' "$0"
+}
+
+show_keys() {
+  if [ ! -f "$KEYS_FILE" ]; then
+    echo "未找到 $KEYS_FILE，请先运行本脚本完成部署" >&2
+    return 1
+  fi
+  echo "== WireGuard / 反向隧道参数（OpenWrt 端部署时填） =="
+  grep -E '^(SERVER_PUBLIC_KEY|VM_PRIVATE_KEY|VM_IP|VMLAN|TUNNEL_UUID|TUNNEL_PORT|WG_VPS_IP)=' "$KEYS_FILE"
+  if [ -f "$LINK_FILE" ]; then
+    echo
+    echo "== 中国侧客户端 vless 链接 =="
+    cat "$LINK_FILE"
+  fi
+}
+
+do_uninstall() {
+  echo "==> 卸载 VPS portal 与 WireGuard 隧道"
+  if [ "${ASSUME_YES:-0}" != "1" ]; then
+    printf "确认卸载？将停止 xray、删除 portal 配置与 wg0 配置 [y/N]: "
+    read -r ans
+    [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { echo "已取消"; exit 0; }
+  fi
+
+  echo "    停止并禁用 xray 服务"
+  systemctl stop xray 2>/dev/null || true
+  systemctl disable xray 2>/dev/null || true
+
+  if [ -f "$XRAY_CONF" ]; then
+    cp -a "$XRAY_CONF" "${XRAY_CONF}.bak-uninstall"
+    rm -f "$XRAY_CONF"
+    echo "    已删除 portal 配置（备份: ${XRAY_CONF}.bak-uninstall）"
+  fi
+
+  echo "    拆除 wg0 隧道"
+  wg-quick down wg0 2>/dev/null || true
+  systemctl disable wg-quick@wg0 2>/dev/null || true
+  rm -f /etc/wireguard/wg0.conf "$KEYS_FILE" "$LINK_FILE"
+
+  rm -f /etc/sysctl.d/99-wg-reality.conf
+
+  if [ "${PURGE_XRAY:-0}" = "1" ]; then
+    echo "    PURGE_XRAY=1，移除 xray 二进制与服务"
+    bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ remove || true
+  fi
+
+  echo "==> 卸载完成"
+}
+
+case "${1:-install}" in
+  install) ;;
+  show-keys|keys|show) show_keys; exit 0 ;;
+  uninstall|remove|rm) do_uninstall; exit 0 ;;
+  help|-h|--help) usage; exit 0 ;;
+  *) echo "未知子命令: $1" >&2; usage; exit 1 ;;
 esac
 
 # 收集 OpenWrt 内网网段（环境变量优先，缺则提示输入）
 if [ -z "$VMLAN" ]; then
-  printf "请输入 OpenWrt VM 内网网段 [192.168.4.0/24]: "; read VMLAN
+  printf "请输入 OpenWrt VM 内网网段 [192.168.4.0/24]: "; read -r VMLAN
   VMLAN=${VMLAN:-192.168.4.0/24}
 fi
 
@@ -95,7 +142,7 @@ PublicKey = ${VM_PUB}
 AllowedIPs = ${WG_VM_IP}/32, ${VMLAN}
 EOF
 
-  cat > /etc/wireguard/keys.env <<EOF
+  cat > "$KEYS_FILE" <<EOF
 # 由 vps-setup.sh 生成，部署 OpenWrt 端时填到 openwrt-setup.sh 的环境变量
 SERVER_PUBLIC_KEY=${SERVER_PUB}
 VM_PRIVATE_KEY=${VM_PRIV}
@@ -122,13 +169,13 @@ REALITY_OUT="$($XRAY_BIN x25519)"
 REALITY_PRIV="$(echo "$REALITY_OUT" | sed -n 's/^PrivateKey: //p')"
 REALITY_PUB="$(echo "$REALITY_OUT" | sed -n 's/^Password (PublicKey): //p')"
 
-# 隧道 UUID 落盘（已有 keys.env 时补写，不覆盖已有值）
-if [ -f /etc/wireguard/keys.env ]; then
-  grep -q '^TUNNEL_UUID=' /etc/wireguard/keys.env || echo "TUNNEL_UUID=${TUNNEL_UUID}" >> /etc/wireguard/keys.env
-  grep -q '^TUNNEL_PORT=' /etc/wireguard/keys.env || echo "TUNNEL_PORT=${TUNNEL_PORT}" >> /etc/wireguard/keys.env
-  grep -q '^WG_VPS_IP=' /etc/wireguard/keys.env || echo "WG_VPS_IP=${WG_VPS_IP}" >> /etc/wireguard/keys.env
+# 隧道参数落盘（已有 keys.env 时补写，不覆盖已有值）
+if [ -f "$KEYS_FILE" ]; then
+  grep -q '^TUNNEL_UUID=' "$KEYS_FILE" || echo "TUNNEL_UUID=${TUNNEL_UUID}" >> "$KEYS_FILE"
+  grep -q '^TUNNEL_PORT=' "$KEYS_FILE" || echo "TUNNEL_PORT=${TUNNEL_PORT}" >> "$KEYS_FILE"
+  grep -q '^WG_VPS_IP=' "$KEYS_FILE" || echo "WG_VPS_IP=${WG_VPS_IP}" >> "$KEYS_FILE"
 else
-  cat > /etc/wireguard/keys.env <<EOF
+  cat > "$KEYS_FILE" <<EOF
 SERVER_PUBLIC_KEY=${SERVER_PUB:-}
 VM_PRIVATE_KEY=${VM_PRIV:-}
 VM_IP=${WG_VM_IP}
@@ -199,8 +246,8 @@ sleep 2
 systemctl is-active xray
 
 CLIENT_LINK="vless://${UUID}@${SERVER_PUBLIC_IP}:${REALITY_PORT}?security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${REALITY_PUB}&sid=${SHORT_ID}&flow=xtls-rprx-vision&type=tcp#foreign-relay"
-printf '%s\n' "$CLIENT_LINK" > /etc/wireguard/client-link.txt
-chmod 600 /etc/wireguard/client-link.txt
+printf '%s\n' "$CLIENT_LINK" > "$LINK_FILE"
+chmod 600 "$LINK_FILE"
 
 echo
 echo "==================== 部署完成 ===================="
@@ -209,12 +256,14 @@ echo "【中国侧客户端导入链接】"
 echo "$CLIENT_LINK"
 echo
 echo "【OpenWrt 端部署需要填的值】（也可在 VPS 上 bash $0 show-keys 复查）"
-echo "  VPS 公钥 SERVER_PUBLIC_KEY = ${SERVER_PUB:-$(grep SERVER_PUBLIC_KEY /etc/wireguard/keys.env | cut -d= -f2)}"
-echo "  本机私钥 VM_PRIVATE_KEY    = ${VM_PRIV:-$(grep VM_PRIVATE_KEY /etc/wireguard/keys.env | cut -d= -f2)}"
+echo "  VPS 公钥 SERVER_PUBLIC_KEY = ${SERVER_PUB:-$(grep SERVER_PUBLIC_KEY "$KEYS_FILE" | cut -d= -f2)}"
+echo "  本机私钥 VM_PRIVATE_KEY    = ${VM_PRIV:-$(grep VM_PRIVATE_KEY "$KEYS_FILE" | cut -d= -f2)}"
 echo "  隧道 UUID TUNNEL_UUID     = ${TUNNEL_UUID}"
 echo "  隧道端口 TUNNEL_PORT      = ${TUNNEL_PORT}"
 echo
 echo "【自检】"
 echo "  VPS: wg show                          # 等 OpenWrt 上线后应有握手"
-echo "  VPS: ss -tnlp | grep ${TUNNEL_PORT}  # 应能看到 10.77.0.1:${TUNNEL_PORT} 上的隧道连接"
+echo "  VPS: ss -tnlp | grep ${TUNNEL_PORT}   # 应能看到 10.77.0.1:${TUNNEL_PORT} 上的隧道连接"
 echo "  中国侧连上后，出口 IP 应为 OpenWrt VM 本地宽带上行 IP（不是本 VPS 的 IP）"
+echo
+echo "【卸载】bash $0 uninstall"

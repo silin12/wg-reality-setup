@@ -6,13 +6,19 @@
 #   - 本机跑一个 xray bridge：经反向隧道连回 VPS portal，
 #     收到的流量用 freedom 直连本机宽带上行出网（出口 = 本机宽带 IP）
 #
+# 子命令：
+#   install      部署 wg0 隧道 + relay bridge（默认）
+#   show-keys    查看本机隧道与 relay 配置（只读）
+#   uninstall    停止 relay、删除 /etc/xray-relay 与 wg0 配置、清理防火墙归属
+#   help         显示本帮助
+#
 # 用法一（交互式，逐项提示输入）：
 #   sh openwrt-setup.sh
 #
 # 用法二（环境变量预填，非交互）：
 #   SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
 #   SERVER_PUBLIC_KEY=xxx VM_PRIVATE_KEY=xxx \
-#   TUNNEL_UUID=xxx sh openwrt-setup.sh
+#   TUNNEL_UUID=xxx sh openwrt-setup.sh install
 #
 # 可选环境变量：
 #   VM_IP=10.77.0.2          隧道本机 IP
@@ -22,50 +28,101 @@
 #   XRAY_ARCH=64             xray 发布包架构后缀（linux-64 / linux-arm64）
 #   SKIP_INSTALL=1           跳过 opkg 装包（内核模块/工具已自带时用）
 #   DRY_RUN=1                只生成配置，不重载网络/防火墙/不启 relay
+#   ASSUME_YES=1             uninstall 跳过确认提示
 # ============================================================
 set -u
 
-# 子命令：查询本机隧道配置（不改动任何配置）
-case "${1:-}" in
-  show-keys|keys|show)
-    echo "== 本机 WireGuard 隧道配置（netifd /etc/config/network） =="
-    uci show network.wg0 2>/dev/null
-    uci show network.wg0peer 2>/dev/null
-    if command -v wg >/dev/null 2>&1; then
-      PRIV=$(uci -q get network.wg0.private_key)
-      [ -n "$PRIV" ] && echo "本机公钥 = $(echo "$PRIV" | wg pubkey)"
-    fi
-    echo
-    echo "== relay bridge 配置 =="
-    cat /etc/xray-relay/config.json 2>/dev/null || echo "未部署"
-    exit 0
-    ;;
+RELAY_DIR=/etc/xray-relay
+RELAY_BIN=${RELAY_DIR}/xray
+RELAY_CONF=${RELAY_DIR}/config.json
+INIT_FILE=/etc/init.d/xray-relay
+FW_INCLUDE=/etc/firewall.wg-zt.sh
+
+usage() {
+  sed -n '2,31p' "$0"
+}
+
+show_keys() {
+  echo "== 本机 WireGuard 隧道配置（netifd /etc/config/network） =="
+  uci show network.wg0 2>/dev/null
+  uci show network.wg0peer 2>/dev/null
+  if command -v wg >/dev/null 2>&1; then
+    PRIV=$(uci -q get network.wg0.private_key)
+    [ -n "$PRIV" ] && echo "本机公钥 = $(echo "$PRIV" | wg pubkey)"
+  fi
+  echo
+  echo "== relay bridge 配置 =="
+  cat "$RELAY_CONF" 2>/dev/null || echo "未部署"
+}
+
+do_uninstall() {
+  echo "==> 卸载 OpenWrt relay bridge 与 wg0 隧道"
+  if [ "${ASSUME_YES:-0}" != "1" ]; then
+    printf "确认卸载？停止 relay、删除 %s、移除 wg0 配置 [y/N]: " "$RELAY_DIR"
+    read -r ans
+    [ "$ans" = "y" ] || [ "$ans" = "Y" ] || { echo "已取消"; exit 0; }
+  fi
+
+  echo "    停止并移除 relay 服务"
+  if [ -x "$INIT_FILE" ]; then
+    "$INIT_FILE" stop 2>/dev/null || true
+    "$INIT_FILE" disable 2>/dev/null || true
+  fi
+  killall xray 2>/dev/null || true
+  rm -rf "$RELAY_DIR"
+  rm -f "$INIT_FILE"
+
+  echo "    移除 netifd wg0 接口"
+  ifdown wg0 2>/dev/null || true
+  uci -q delete network.wg0peer
+  uci -q delete network.wg0
+  uci commit network
+
+  echo "    清理防火墙 wg0 归属与 include"
+  LAN_ZONE=$(uci show firewall | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='lan'$/\1/p" | head -1)
+  if [ -n "$LAN_ZONE" ]; then
+    uci -q del_list firewall."$LAN_ZONE".network='wg0'
+  fi
+  uci -q delete firewall.wgztinc
+  rm -f "$FW_INCLUDE"
+  uci commit firewall
+  /etc/init.d/firewall restart 2>/dev/null || true
+
+  echo "==> 卸载完成（ZeroTier 及其余配置未改动）"
+}
+
+case "${1:-install}" in
+  install) ;;
+  show-keys|keys|show) show_keys; exit 0 ;;
+  uninstall|remove|rm) do_uninstall; exit 0 ;;
+  help|-h|--help) usage; exit 0 ;;
+  *) echo "未知子命令: $1" >&2; usage; exit 1 ;;
 esac
 
 # ---- 1. 收集参数：环境变量优先，缺什么提示输入 ----
 if [ -z "${SERVER_HOST:-}" ]; then
-  printf "请输入 VPS IP [38.22.94.13]: "; read SERVER_HOST
+  printf "请输入 VPS IP [38.22.94.13]: "; read -r SERVER_HOST
   SERVER_HOST=${SERVER_HOST:-38.22.94.13}
 fi
 if [ -z "${SERVER_PORT:-}" ]; then
-  printf "请输入 VPS WireGuard 端口 [51820]: "; read SERVER_PORT
+  printf "请输入 VPS WireGuard 端口 [51820]: "; read -r SERVER_PORT
   SERVER_PORT=${SERVER_PORT:-51820}
 fi
 if [ -z "${SERVER_PUBLIC_KEY:-}" ]; then
-  printf "请输入 VPS WireGuard 公钥（SERVER_PUBLIC_KEY）: "; read SERVER_PUBLIC_KEY
+  printf "请输入 VPS WireGuard 公钥（SERVER_PUBLIC_KEY）: "; read -r SERVER_PUBLIC_KEY
 fi
 if [ -z "${VM_PRIVATE_KEY:-}" ]; then
-  printf "请输入本机 WireGuard 私钥（VM_PRIVATE_KEY）: "; read VM_PRIVATE_KEY
+  printf "请输入本机 WireGuard 私钥（VM_PRIVATE_KEY）: "; read -r VM_PRIVATE_KEY
 fi
 if [ -z "${TUNNEL_UUID:-}" ]; then
-  printf "请输入隧道 UUID（TUNNEL_UUID，VPS show-keys 里取）: "; read TUNNEL_UUID
+  printf "请输入隧道 UUID（TUNNEL_UUID，VPS show-keys 里取）: "; read -r TUNNEL_UUID
 fi
 if [ -z "${VM_IP:-}" ]; then
-  printf "请输入隧道本机 IP [10.77.0.2]: "; read VM_IP
+  printf "请输入隧道本机 IP [10.77.0.2]: "; read -r VM_IP
   VM_IP=${VM_IP:-10.77.0.2}
 fi
 if [ -z "${LAN_IF:-}" ]; then
-  printf "请输入 LAN 网卡名 [br-lan]: "; read LAN_IF
+  printf "请输入 LAN 网卡名 [br-lan]: "; read -r LAN_IF
   LAN_IF=${LAN_IF:-br-lan}
 fi
 KEEPALIVE=${KEEPALIVE:-25}
@@ -140,16 +197,16 @@ LAN_ZONE=$(uci show firewall | sed -n "s/^firewall\.\(@zone\[[0-9]*\]\)\.name='l
 if [ -n "$LAN_ZONE" ]; then
   # 确保 lan 网桥与 wg0 都在 lan 区域内：缺 lan 时 fw4 不会生成 br-lan 入站
   # 放行规则，LAN 客户端的 DHCP Discover 会被默认 drop 策略丢弃，拿不到 IPv4。
-  uci -q del_list firewall.${LAN_ZONE}.network='lan' || true
-  uci -q del_list firewall.${LAN_ZONE}.network='wg0' || true
-  uci add_list firewall.${LAN_ZONE}.network='lan'
-  uci add_list firewall.${LAN_ZONE}.network='wg0'
+  uci -q del_list firewall."$LAN_ZONE".network='lan' || true
+  uci -q del_list firewall."$LAN_ZONE".network='wg0' || true
+  uci add_list firewall."$LAN_ZONE".network='lan'
+  uci add_list firewall."$LAN_ZONE".network='wg0'
   echo "    lan / wg0 已加入 lan 区域"
 else
   echo "    未找到 lan 区域，跳过 zone 归属（靠 include 兜底）"
 fi
 
-cat > /etc/firewall.wg-zt.sh <<'EOF'
+cat > "$FW_INCLUDE" <<'EOF'
 #!/bin/sh
 for n in /sys/class/net/zt* /sys/class/net/wg0; do
   [ -e "$n" ] || continue
@@ -158,12 +215,12 @@ for n in /sys/class/net/zt* /sys/class/net/wg0; do
   nft insert rule inet fw4 forward iifname "$n" accept 2>/dev/null || true
 done
 EOF
-chmod +x /etc/firewall.wg-zt.sh
+chmod +x "$FW_INCLUDE"
 
 uci -q delete firewall.wgztinc || true
 uci set firewall.wgztinc=include
 uci set firewall.wgztinc.type='script'
-uci set firewall.wgztinc.path='/etc/firewall.wg-zt.sh'
+uci set firewall.wgztinc.path="$FW_INCLUDE"
 
 if [ "$DRY_RUN" != "1" ]; then
   uci commit firewall
@@ -175,10 +232,6 @@ else
 fi
 
 # ---- 5. 部署 relay bridge（xray 进程 + procd 自启） ----
-RELAY_DIR=/etc/xray-relay
-RELAY_BIN=${RELAY_DIR}/xray
-RELAY_CONF=${RELAY_DIR}/config.json
-
 echo "==> 4/5 部署 relay bridge"
 mkdir -p "$RELAY_DIR"
 
@@ -237,7 +290,7 @@ cat > "$RELAY_CONF" <<EOF
 EOF
 
 # procd 开机自启脚本
-cat > /etc/init.d/xray-relay <<'EOF'
+cat > "$INIT_FILE" <<'EOF'
 #!/bin/sh /etc/rc.common
 START=99
 STOP=10
@@ -259,16 +312,16 @@ stop_service() {
   killall xray 2>/dev/null || true
 }
 EOF
-chmod +x /etc/init.d/xray-relay
+chmod +x "$INIT_FILE"
 
 if [ "$DRY_RUN" != "1" ]; then
-  /etc/init.d/xray-relay enable
+  "$INIT_FILE" enable
   if [ -x "$RELAY_BIN" ]; then
     "$RELAY_BIN" -test -config "$RELAY_CONF" 2>&1 | tail -2 || true
     killall xray 2>/dev/null || true
-    /etc/init.d/xray-relay restart
+    "$INIT_FILE" restart
   else
-    echo "    relay 二进制缺失，暂未启动；补齐 ${RELAY_BIN} 后执行 /etc/init.d/xray-relay start" >&2
+    echo "    relay 二进制缺失，暂未启动；补齐 ${RELAY_BIN} 后执行 $INIT_FILE start" >&2
   fi
 fi
 
@@ -292,3 +345,4 @@ fi
 echo
 echo "==================== 部署完成 ===================="
 echo "复查命令：sh $0 show-keys"
+echo "卸载命令：sh $0 uninstall"

@@ -100,6 +100,23 @@ bash /root/vps-setup.sh show-keys
 sh /tmp/openwrt-setup.sh show-keys
 ```
 
+### 卸载
+
+两个脚本都带 `uninstall` 子命令，默认二次确认（`ASSUME_YES=1` 跳过提示）：
+
+```sh
+# VPS：停止 xray、删除 portal 配置与 wg0 隧道；默认保留 xray 二进制
+bash vps-setup.sh uninstall
+# 连 xray 二进制与服务一并删除：
+PURGE_XRAY=1 bash vps-setup.sh uninstall
+
+# OpenWrt：停止 relay、删除 /etc/xray-relay、移除 wg0 配置与防火墙归属
+sh /tmp/openwrt-setup.sh uninstall
+```
+
+- VPS 的 portal 配置删除前会另存 `config.json.bak-uninstall`；
+- OpenWrt 卸载只清理本方案的 relay / wg0 / 防火墙 include，不动 ZeroTier、OpenClash 及其它服务。
+
 ## 端口与地址规划
 
 | 项目 | 值 | 说明 |
@@ -127,10 +144,10 @@ sh /tmp/openwrt-setup.sh show-keys
 
 ## 文件
 
-- `vps-setup.sh` — VPS：装 WG + Xray portal，生成密钥 / UUID / 客户端链接
-- `openwrt-setup.sh` — OpenWrt：WG netifd + relay bridge（xray + procd 自启）
+- `vps-setup.sh` — VPS：装 WG + Xray portal；子命令 `install` / `show-keys` / `uninstall`
+- `openwrt-setup.sh` — OpenWrt：WG netifd + relay bridge（xray + procd 自启）；子命令 `install` / `show-keys` / `uninstall`
 - `pc-fix-luci.ps1` — Windows：清理代理例外里的 `192.168.*`，重启 v2rayN / ZT
-- `openwrt-diag.sh` — 监听端口、防火墙 zone / include、nft 规则、进程自检
+- `openwrt-diag.sh` — 只读自检：监听端口、防火墙 zone / include、nft 规则、进程
 - `openwrt-fix-access.sh` — 修复 `zt*/wg0` 本机访问被拒
 
 ## 已知事项

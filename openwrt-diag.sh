@@ -1,5 +1,7 @@
 #!/bin/sh
-# 诊断脚本：收集 OpenWrt 本机服务监听、防火墙区域、nft/iptables 规则与进程
+# 诊断脚本（只读）：收集 OpenWrt 本机服务监听、防火墙区域、nft 规则与进程
+# 用法：sh openwrt-diag.sh
+
 echo '===== 1. 监听端口 ====='
 netstat -ltn 2>/dev/null || ss -ltn
 
@@ -20,14 +22,11 @@ nft list chain inet fw4 input 2>/dev/null | head -40
 echo '===== 4c. input 链 iifname 规则 ====='
 nft list chain inet fw4 input 2>/dev/null | grep iifname
 
-echo '===== 4d. 手动插入测试（显示报错） ====='
-nft insert rule inet fw4 input iifname "zt5u47vls2" accept && echo INSERT_OK || echo INSERT_FAIL
-
 echo '===== 5. iptables-legacy INPUT ====='
 iptables-legacy -L INPUT -n -v 2>/dev/null | head -20
 
 echo '===== 6. 服务进程 ====='
-ps | grep -E 'uhttpd|dropbear|fw4|nft' | grep -v grep
+ps | grep -E 'uhttpd|dropbear|fw4|nft|xray' | grep -v grep
 
 echo '===== 7. 网卡地址 ====='
 ip -4 addr show | grep -E '^[0-9]|inet '
