@@ -30,9 +30,9 @@ usage() {
 }
 
 detect_role() {
-  if [ -f /etc/openwrt_release ] || command -v opkg >/dev/null 2>&1; then
+  if [ -f /etc/openwrt_release ] || command -v opkg >/dev/null 2>&1 || command -v uci >/dev/null 2>&1; then
     echo openwrt
-  elif command -v apt-get >/dev/null 2>&1; then
+  elif command -v apt-get >/dev/null 2>&1 || command -v dpkg >/dev/null 2>&1; then
     echo vps
   else
     echo unknown

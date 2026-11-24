@@ -64,13 +64,19 @@ OpenWrt VM（bridge）
 | 4 | 卸载 | `uninstall` | `uninstall` |
 | 0 | 退出 | — | — |
 
-### 第一步：VPS 上跑
+### 一键命令（VPS / OpenWrt 同一条）
+
+两台机器都用下面这一条，脚本自动识别当前是 VPS（Debian/Ubuntu）还是 OpenWrt，进入对应类别菜单：
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/setup.sh) vps
+(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/setup.sh -o /root/setup.sh || wget -O /root/setup.sh https://raw.githubusercontent.com/silin12/wg-reality-setup/main/setup.sh) && sh /root/setup.sh
 ```
 
-可选环境变量：
+- 识别为 **VPS**：装 WG 服务端 + Xray portal（REALITY `5678` / 隧道 `5679`）；
+- 识别为 **OpenWrt**：装 netifd `wg0` 客户端 + relay bridge（freedom 本机宽带直出）；
+- 识别不了时会先弹类别菜单手动选；也可显式指定类别覆盖识别：`sh /root/setup.sh vps` 或 `sh /root/setup.sh openwrt`。
+
+### VPS 端可选环境变量
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -82,14 +88,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/mai
 
 跑完输出：PC 用的 vless 链接，以及 `SERVER_PUBLIC_KEY`、`VM_PRIVATE_KEY`、`TUNNEL_UUID`、`TUNNEL_PORT`（给 OpenWrt 端填）。
 
-### 第二步：OpenWrt VM 上跑
-
-```sh
-wget -O /root/setup.sh https://raw.githubusercontent.com/silin12/wg-reality-setup/main/setup.sh
-sh /root/setup.sh openwrt
-```
-
-环境变量预填、非交互：
+### OpenWrt 端环境变量预填、非交互
 
 ```sh
 SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
