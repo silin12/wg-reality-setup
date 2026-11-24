@@ -792,12 +792,14 @@ bridge_menu() {
 }
 
 bridge_menu_endpoint() {
-  printf "请输入新的 VPS 中转 IP（可带 :端口，回车取消）: "; read -r h
+  printf "请输入新的 VPS 中转 IP 或域名（回车取消）: "; read -r h
   [ -n "$h" ] || { echo "已取消"; return 0; }
   case "$h" in
     *:*) p=${h##*:}; h=${h%:*} ;;
     *) p=51820 ;;
   esac
+  printf "请输入对接端口 [%s]: " "$p"; read -r rp
+  [ -n "$rp" ] && p=$rp
   bridge_set_endpoint "$h" "$p"
 }
 

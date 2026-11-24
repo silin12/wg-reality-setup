@@ -142,7 +142,7 @@ sh setup.sh openwrt set-endpoint <新IP> [51820]
 ```
 
 - VPS 本机监听均为 `0.0.0.0` / 隧道内网地址，WG peer 支持漫游，VPS 侧无需改配置；只需确认新 IP 的防火墙放行 TCP `5678`、UDP `51820`。
-- 菜单里选「更换 VPS IP」后直接输入新 IP（OpenWrt 可写 `IP:端口`，默认 `51820`；VPS 回车则自动探测本机公网 IP）；`set-endpoint` 同时写持久化 UCI 并下发到运行中的 `wg0`，`refresh-link` 只更新 `/etc/wireguard/client-link.txt`，不动 xray 配置与隧道密钥；改完只回显 endpoint 与握手状态，不打印整份配置。
+- 菜单里选「更换中转 IP」后先输入新 IP（可在 IP 后直接写 `:端口`），再弹一次端口确认（默认 `51820`，回车沿用）；VPS 回车则自动探测本机公网 IP。`set-endpoint` 同时写持久化 UCI 并下发到运行中的 `wg0`，`refresh-link` 只更新 `/etc/wireguard/client-link.txt`，不动 xray 配置与隧道密钥；改完只回显 endpoint 与握手状态，不打印整份配置。
 
 ### 卸载
 
