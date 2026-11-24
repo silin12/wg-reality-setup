@@ -21,6 +21,7 @@ if (Test-Path $cfg) {
   $ex = ($j.SystemProxyItem.SystemProxyExceptions -split ';') |
         Where-Object { $_ -and $_.Trim() -ne '192.168.*' }
   $j.SystemProxyItem.SystemProxyExceptions = ($ex -join ';')
+  $j.SystemProxyItem.SysProxyType = 1   # 1=自动配置系统代理（0=不改变）
   $j | ConvertTo-Json -Depth 100 | Set-Content $cfg -Encoding UTF8
   "[ok] v2rayN 例外列表: $($j.SystemProxyItem.SystemProxyExceptions)"
 } else {
