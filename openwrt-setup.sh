@@ -9,6 +9,7 @@
 # 子命令：
 #   install      部署 wg0 隧道 + relay bridge（默认）
 #   show-keys    查看本机隧道与 relay 配置（只读）
+#   set-endpoint 更换 VPS 地址/端口（保留密钥、peer 与 relay 配置不动）
 #   uninstall    停止 relay、删除 /etc/xray-relay 与 wg0 配置、清理防火墙归属
 #   help         显示本帮助
 #
@@ -55,6 +56,38 @@ show_keys() {
   cat "$RELAY_CONF" 2>/dev/null || echo "未部署"
 }
 
+set_endpoint() {
+  # 用法: openwrt-setup.sh set-endpoint <新VPS地址或域名> [端口]
+  NEW_HOST=${2:-}
+  NEW_PORT=${3:-$(uci -q get network.wg0peer.endpoint_port)}
+  NEW_PORT=${NEW_PORT:-51820}
+  if [ -z "$NEW_HOST" ]; then
+    echo "用法: $0 set-endpoint <新VPS地址或域名> [端口]" >&2
+    exit 1
+  fi
+  PUB=$(uci -q get network.wg0peer.public_key)
+  if [ -z "$PUB" ]; then
+    echo "错误: 未找到 network.wg0peer，请先完成 install" >&2
+    exit 1
+  fi
+
+  uci set network.wg0peer.endpoint_host="$NEW_HOST"
+  uci set network.wg0peer.endpoint_port="$NEW_PORT"
+  uci commit network
+  echo "==> 已持久化 endpoint = ${NEW_HOST}:${NEW_PORT}"
+
+  if command -v wg >/dev/null 2>&1; then
+    wg set wg0 peer "$PUB" endpoint "${NEW_HOST}:${NEW_PORT}" 2>/dev/null \
+      && echo "==> 已生效到运行中的 wg0（下一次心跳即重新握手）" \
+      || { echo "==> wg set 未生效，重启 wg0"; ifup wg0 2>/dev/null || true; }
+  else
+    ifup wg0 2>/dev/null || true
+  fi
+
+  echo "-- 当前 wg0 状态 --"
+  wg show wg0 2>/dev/null || uci show network.wg0peer
+}
+
 do_uninstall() {
   echo "==> 卸载 OpenWrt relay bridge 与 wg0 隧道"
   if [ "${ASSUME_YES:-0}" != "1" ]; then
@@ -94,6 +127,7 @@ do_uninstall() {
 case "${1:-install}" in
   install) ;;
   show-keys|keys|show) show_keys; exit 0 ;;
+  set-endpoint|endpoint|set-ip) set_endpoint "$@"; exit 0 ;;
   uninstall|remove|rm) do_uninstall; exit 0 ;;
   help|-h|--help) usage; exit 0 ;;
   *) echo "未知子命令: $1" >&2; usage; exit 1 ;;

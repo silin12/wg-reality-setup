@@ -100,6 +100,23 @@ bash /root/vps-setup.sh show-keys
 sh /tmp/openwrt-setup.sh show-keys
 ```
 
+### 更换 VPS IP
+
+VPS 换公网 IP 后不用重装，按下面三步改：
+
+```sh
+# 1. VPS 上重建客户端链接（密钥 / 端口 / 配置不变；不传 IP 则自动探测本机公网 IP）
+bash vps-setup.sh refresh-link [新IP]
+
+# 2. OpenWrt 上把 WG 对端指向新 IP（保留密钥、peer 与 relay 配置）
+sh openwrt-setup.sh set-endpoint <新IP> [51820]
+
+# 3. PC 侧用第 1 步输出的新 vless 链接重新导入 v2rayN
+```
+
+- VPS 本机监听均为 `0.0.0.0` / 隧道内网地址，WG peer 支持漫游，VPS 侧无需改配置；只需确认新 IP 的防火墙放行 TCP `5678`、UDP `51820`。
+- `set-endpoint` 同时写持久化 UCI 并下发到运行中的 `wg0`；`refresh-link` 只更新 `/etc/wireguard/client-link.txt`，不动 xray 配置与隧道密钥。
+
 ### 卸载
 
 两个脚本都带 `uninstall` 子命令，默认二次确认（`ASSUME_YES=1` 跳过提示）：
@@ -145,8 +162,8 @@ sh /tmp/openwrt-setup.sh uninstall
 
 ## 文件
 
-- `vps-setup.sh` — VPS：装 WG + Xray portal；子命令 `install` / `show-keys` / `uninstall`
-- `openwrt-setup.sh` — OpenWrt：WG netifd + relay bridge（xray + procd 自启）；子命令 `install` / `show-keys` / `uninstall`
+- `vps-setup.sh` — VPS：装 WG + Xray portal；子命令 `install` / `show-keys` / `refresh-link` / `uninstall`
+- `openwrt-setup.sh` — OpenWrt：WG netifd + relay bridge（xray + procd 自启）；子命令 `install` / `show-keys` / `set-endpoint` / `uninstall`
 - `pc-fix-luci.ps1` — Windows：清理代理例外里的 `192.168.*`，重启 v2rayN / ZT
 - `openwrt-diag.sh` — 只读自检：监听端口、防火墙 zone / include、nft 规则、进程
 - `openwrt-fix-access.sh` — 修复 `zt*/wg0` 本机访问被拒

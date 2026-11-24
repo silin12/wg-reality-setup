@@ -8,11 +8,12 @@
 # 子命令：
 #   install      部署 WireGuard 服务端 + Xray portal（默认）
 #   show-keys    查看已保存的密钥 / 隧道参数 / 客户端链接（只读）
+#   refresh-link 换 IP 后重建客户端链接（密钥 / 端口 / 配置不变）
 #   uninstall    停止并卸载 portal 与 wg0 隧道（保留 xray 二进制，除非 PURGE_XRAY=1）
 #   help         显示本帮助
 #
 # 用法：
-#   bash vps-setup.sh [install|show-keys|uninstall|help]
+#   bash vps-setup.sh [install|show-keys|refresh-link [新IP]|uninstall|help]
 #
 # 可选环境变量（install 时生效）：
 #   VMLAN=192.168.4.0/24          # OpenWrt VM 的内网网段
@@ -57,6 +58,46 @@ show_keys() {
     echo "== 中国侧客户端 vless 链接 =="
     cat "$LINK_FILE"
   fi
+}
+
+refresh_link() {
+  # 用法: vps-setup.sh refresh-link [新公网IP]
+  [ -f "$KEYS_FILE" ] || { echo "未找到 $KEYS_FILE，请先完成部署" >&2; exit 1; }
+  # shellcheck disable=SC1090
+  . "$KEYS_FILE"
+
+  # 兜底：旧部署未把客户端参数落 keys.env 时，从现有 portal 配置解析
+  if [ -z "${UUID:-}" ] && [ -f "$XRAY_CONF" ]; then
+    UUID=$(sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' "$XRAY_CONF" | head -1)
+  fi
+  if [ -z "${REALITY_PUB:-}" ] && [ -f "$XRAY_CONF" ]; then
+    PRIV=$(sed -n 's/.*"privateKey": *"\([^"]*\)".*/\1/p' "$XRAY_CONF" | head -1)
+    [ -n "${PRIV:-}" ] && REALITY_PUB=$("$XRAY_BIN" x25519 -i "$PRIV" | sed -n 's/^Password (PublicKey): //p')
+  fi
+  if [ -z "${SHORT_ID:-}" ] && [ -f "$XRAY_CONF" ]; then
+    SHORT_ID=$(sed -n '/"shortIds"/{n; s/^[[:space:]]*"\([^"]*\)".*/\1/p; q}' "$XRAY_CONF")
+  fi
+  if [ -z "${REALITY_SNI:-}" ] && [ -f "$XRAY_CONF" ]; then
+    REALITY_SNI=$(sed -n '/"serverNames"/{n; s/^[[:space:]]*"\([^"]*\)".*/\1/p; q}' "$XRAY_CONF")
+  fi
+  [ -z "${REALITY_PORT:-}" ] && REALITY_PORT=${REALITY_PORT:-5678}
+
+  NEW_IP=${2:-}
+  if [ -z "$NEW_IP" ]; then
+    NEW_IP=$(curl -s --max-time 5 https://ifconfig.me || true)
+    [ -z "$NEW_IP" ] && NEW_IP=$(curl -s --max-time 5 https://api.ip.sb/ip || true)
+  fi
+  NEW_IP=$(echo "$NEW_IP" | tr -d '[:space:]')
+  if [ -z "$NEW_IP" ]; then
+    echo "无法自动获取公网 IP，请手动传入: $0 refresh-link <IP>" >&2
+    exit 1
+  fi
+
+  CLIENT_LINK="vless://${UUID}@${NEW_IP}:${REALITY_PORT}?security=reality&sni=${REALITY_SNI}&fp=chrome&pbk=${REALITY_PUB}&sid=${SHORT_ID}&flow=xtls-rprx-vision&type=tcp#foreign-relay"
+  printf '%s\n' "$CLIENT_LINK" > "$LINK_FILE"
+  chmod 600 "$LINK_FILE"
+  echo "==> 客户端链接已更新（endpoint = ${NEW_IP}:${REALITY_PORT}，密钥不变）"
+  echo "$CLIENT_LINK"
 }
 
 do_uninstall() {
@@ -105,6 +146,7 @@ do_uninstall() {
 case "${1:-install}" in
   install) ;;
   show-keys|keys|show) show_keys; exit 0 ;;
+  refresh-link|relink|refresh) refresh_link "$@"; exit 0 ;;
   uninstall|remove|rm) do_uninstall; exit 0 ;;
   help|-h|--help) usage; exit 0 ;;
   *) echo "未知子命令: $1" >&2; usage; exit 1 ;;
@@ -184,6 +226,11 @@ if [ -f "$KEYS_FILE" ]; then
   grep -q '^TUNNEL_UUID=' "$KEYS_FILE" || echo "TUNNEL_UUID=${TUNNEL_UUID}" >> "$KEYS_FILE"
   grep -q '^TUNNEL_PORT=' "$KEYS_FILE" || echo "TUNNEL_PORT=${TUNNEL_PORT}" >> "$KEYS_FILE"
   grep -q '^WG_VPS_IP=' "$KEYS_FILE" || echo "WG_VPS_IP=${WG_VPS_IP}" >> "$KEYS_FILE"
+  grep -q '^UUID=' "$KEYS_FILE" || echo "UUID=${UUID}" >> "$KEYS_FILE"
+  grep -q '^REALITY_PUB=' "$KEYS_FILE" || echo "REALITY_PUB=${REALITY_PUB}" >> "$KEYS_FILE"
+  grep -q '^SHORT_ID=' "$KEYS_FILE" || echo "SHORT_ID=${SHORT_ID}" >> "$KEYS_FILE"
+  grep -q '^REALITY_SNI=' "$KEYS_FILE" || echo "REALITY_SNI=${REALITY_SNI}" >> "$KEYS_FILE"
+  grep -q '^REALITY_PORT=' "$KEYS_FILE" || echo "REALITY_PORT=${REALITY_PORT}" >> "$KEYS_FILE"
 else
   cat > "$KEYS_FILE" <<EOF
 SERVER_PUBLIC_KEY=${SERVER_PUB:-}
@@ -193,6 +240,11 @@ VMLAN=${VMLAN}
 WG_VPS_IP=${WG_VPS_IP}
 TUNNEL_PORT=${TUNNEL_PORT}
 TUNNEL_UUID=${TUNNEL_UUID}
+UUID=${UUID}
+REALITY_PUB=${REALITY_PUB}
+SHORT_ID=${SHORT_ID}
+REALITY_SNI=${REALITY_SNI}
+REALITY_PORT=${REALITY_PORT}
 EOF
 fi
 
