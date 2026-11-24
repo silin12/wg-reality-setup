@@ -27,7 +27,7 @@ OpenWrt VM（bridge）
 
 ## 部署分工：哪台装什么
 
-| 组件 / 配置 | VPS（`vps-setup.sh`，公网入口/中继） | OpenWrt VM（`openwrt-setup.sh`，内网 bridge） |
+| 组件 / 配置 | VPS（`setup.sh vps`，公网入口/中继） | OpenWrt VM（`setup.sh openwrt`，内网 bridge） |
 |---|---|---|
 | 系统依赖 | `wireguard-tools`、`curl`、`openssl`、`iptables`；官方 Xray 安装包 | opkg 装 wireguard 内核模块 / kmod、`curl`、`openssl`（已自带可 `SKIP_INSTALL=1`） |
 | WireGuard | 服务端 `wg0` `10.77.0.1`，UDP `51820`，`wg-quick@wg0` 自启 | netifd 原生 `wg0` 客户端 `10.77.0.2`，endpoint 指向 VPS `51820` |
@@ -54,7 +54,7 @@ OpenWrt VM（bridge）
 
 ### 脚本主菜单
 
-两个脚本直接运行即进入统一编号菜单（`1` 安装 / `2` 查询 / `3` 改 IP / `4` 卸载 / `0` 退出），也可用同名子命令非交互调用：
+单文件 `setup.sh` 分两个类别：`setup.sh vps`（VPS 端）、`setup.sh openwrt`（OpenWrt 端）；不带类别直接运行会自动识别系统，识别不了则先在类别菜单里选择。进入类别后是统一编号子菜单（`1` 安装 / `2` 查询 / `3` 改 IP / `4` 卸载 / `0` 退出），也可用子命令非交互调用：
 
 | 编号 | 动作 | VPS 子命令 | OpenWrt 子命令 |
 |---|---|---|---|
@@ -67,7 +67,7 @@ OpenWrt VM（bridge）
 ### 第一步：VPS 上跑
 
 ```sh
-bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/vps-setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/main/setup.sh) vps
 ```
 
 可选环境变量：
@@ -85,8 +85,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/silin12/wg-reality-setup/mai
 ### 第二步：OpenWrt VM 上跑
 
 ```sh
-wget -O /tmp/openwrt-setup.sh https://raw.githubusercontent.com/silin12/wg-reality-setup/main/openwrt-setup.sh
-sh /tmp/openwrt-setup.sh
+wget -O /root/setup.sh https://raw.githubusercontent.com/silin12/wg-reality-setup/main/setup.sh
+sh /root/setup.sh openwrt
 ```
 
 环境变量预填、非交互：
@@ -94,7 +94,7 @@ sh /tmp/openwrt-setup.sh
 ```sh
 SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
 SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> TUNNEL_UUID=<隧道 UUID> \
-sh /tmp/openwrt-setup.sh
+sh /root/setup.sh openwrt install
 ```
 
 脚本完成：netifd 原生 `wg0` 接口、防火墙放行 `wg0/zt*`、下载 Xray 静态二进制到 `/etc/xray-relay/`、写 bridge 配置与 procd 自启。
@@ -121,10 +121,10 @@ powershell -ExecutionPolicy Bypass -File $env:TEMP\pc-fix-luci.ps1
 
 ```sh
 # VPS 上查 WireGuard 公钥、隧道 UUID、客户端链接
-bash /root/vps-setup.sh show-keys
+bash /root/setup.sh vps show-keys
 
 # OpenWrt 上查本机隧道配置与 relay 配置
-sh /tmp/openwrt-setup.sh show-keys
+sh /root/setup.sh openwrt show-keys
 ```
 
 ### 更换 VPS IP
@@ -133,10 +133,10 @@ VPS 换公网 IP 后不用重装，按下面三步改：
 
 ```sh
 # 1. VPS 上重建客户端链接（密钥 / 端口 / 配置不变；不传 IP 则自动探测本机公网 IP）
-bash vps-setup.sh refresh-link [新IP]
+bash setup.sh vps refresh-link [新IP]
 
 # 2. OpenWrt 上把 WG 对端指向新 IP（保留密钥、peer 与 relay 配置）
-sh openwrt-setup.sh set-endpoint <新IP> [51820]
+sh setup.sh openwrt set-endpoint <新IP> [51820]
 
 # 3. PC 侧用第 1 步输出的新 vless 链接重新导入 v2rayN
 ```
@@ -150,12 +150,12 @@ sh openwrt-setup.sh set-endpoint <新IP> [51820]
 
 ```sh
 # VPS：停止 xray、删除 portal 配置与 wg0 隧道；默认保留 xray 二进制
-bash vps-setup.sh uninstall
+bash setup.sh vps uninstall
 # 连 xray 二进制与服务一并删除：
-PURGE_XRAY=1 bash vps-setup.sh uninstall
+PURGE_XRAY=1 bash setup.sh vps uninstall
 
 # OpenWrt：停止 relay、删除 /etc/xray-relay、移除 wg0 配置与防火墙归属
-sh /tmp/openwrt-setup.sh uninstall
+sh /root/setup.sh openwrt uninstall
 ```
 
 - VPS 的 portal 配置删除前会另存 `config.json.bak-uninstall`；脚本靠 `.wg-reality` 标记识别本方案配置，缺标记会跳过 xray 服务/配置删除，避免误删混部的其它实例。
@@ -189,8 +189,9 @@ sh /tmp/openwrt-setup.sh uninstall
 
 ## 文件
 
-- `vps-setup.sh` — VPS：装 WG + Xray portal；子命令 `install` / `show-keys` / `refresh-link` / `uninstall`
-- `openwrt-setup.sh` — OpenWrt：WG netifd + relay bridge（xray + procd 自启）；子命令 `install` / `show-keys` / `set-endpoint` / `uninstall`
+- `setup.sh` — 单文件一键脚本，两类部署：
+  - `setup.sh vps` — VPS：WG 服务端 + Xray portal；子命令 `install` / `show-keys` / `refresh-link` / `uninstall`
+  - `setup.sh openwrt` — OpenWrt：WG netifd + relay bridge（xray + procd 自启）；子命令 `install` / `show-keys` / `set-endpoint` / `uninstall`
 - `pc-fix-luci.ps1` — Windows：清理代理例外里的 `192.168.*`，重启 v2rayN / ZT
 - `openwrt-diag.sh` — 只读自检：监听端口、防火墙 zone / include、nft 规则、进程
 - `openwrt-fix-access.sh` — 修复 `zt*/wg0` 本机访问被拒
