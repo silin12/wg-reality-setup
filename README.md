@@ -82,17 +82,17 @@ OpenWrt VM（bridge）
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `VMLAN` | `192.168.4.0/24` | OpenWrt VM 内网网段 |
-| `WAN_IF` | `ens17` | VPS 公网网卡 |
+| `WAN_IF` | 自动探测默认路由网卡 | VPS 公网网卡（可手动指定覆盖） |
 | `REALITY_PORT` | `5678` | REALITY 入站端口（PC 连接） |
 | `TUNNEL_PORT` | `5679` | interconn 反向隧道端口（只绑 WG 内网地址） |
-| `SERVER_PUBLIC_IP` | `38.22.94.13` | 写进客户端链接的 VPS 公网 IP |
+| `SERVER_PUBLIC_IP` | 自动探测本机公网 IP | 写进客户端链接的 VPS 公网 IP（可手动指定覆盖） |
 
 跑完输出：PC 用的 vless 链接，以及 `SERVER_PUBLIC_KEY`、`VM_PRIVATE_KEY`、`TUNNEL_UUID`、`TUNNEL_PORT`（给 OpenWrt 端填）。
 
 ### OpenWrt 端环境变量预填、非交互
 
 ```sh
-SERVER_HOST=38.22.94.13 SERVER_PORT=51820 \
+SERVER_HOST=<VPS 公网IP> SERVER_PORT=51820 \
 SERVER_PUBLIC_KEY=<VPS 公钥> VM_PRIVATE_KEY=<VM 私钥> TUNNEL_UUID=<隧道 UUID> \
 sh /root/setup.sh openwrt install
 ```

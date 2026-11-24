@@ -74,10 +74,10 @@ WG_NET=10.77.0.0/24
 WG_VPS_IP=10.77.0.1
 WG_VM_IP=10.77.0.2
 VMLAN=${VMLAN:-}
-WAN_IF=${WAN_IF:-ens17}
+WAN_IF=${WAN_IF:-}
 REALITY_PORT=${REALITY_PORT:-5678}
 TUNNEL_PORT=${TUNNEL_PORT:-5679}
-SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-38.22.94.13}
+SERVER_PUBLIC_IP=${SERVER_PUBLIC_IP:-}
 REALITY_SNI=${REALITY_SNI:-www.microsoft.com}
 REALITY_DEST=${REALITY_DEST:-www.microsoft.com:443}
 XRAY_BIN=/usr/local/bin/xray
@@ -200,6 +200,22 @@ echo "==> 1/6 安装依赖"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y wireguard-tools curl openssl iptables
+
+# 自动探测出网网卡与本机公网 IP（环境变量 WAN_IF / SERVER_PUBLIC_IP 可覆盖）
+if [ -z "${WAN_IF:-}" ]; then
+  DETECT_IF=$(ip route 2>/dev/null | awk '/default/{print $5; exit}')
+  [ -n "$DETECT_IF" ] && WAN_IF=$DETECT_IF
+fi
+if [ -z "${SERVER_PUBLIC_IP:-}" ]; then
+  SERVER_PUBLIC_IP=$(curl -s --max-time 5 https://ifconfig.me || true)
+  [ -z "$SERVER_PUBLIC_IP" ] && SERVER_PUBLIC_IP=$(curl -s --max-time 5 https://api.ip.sb/ip || true)
+  SERVER_PUBLIC_IP=$(echo "$SERVER_PUBLIC_IP" | tr -d '[:space:]')
+fi
+if [ -z "${SERVER_PUBLIC_IP:-}" ]; then
+  echo "无法自动获取公网 IP，请先指定后重试: SERVER_PUBLIC_IP=<本VPS公网IP> $0 vps install" >&2
+  exit 1
+fi
+echo "==> 本机公网 IP: ${SERVER_PUBLIC_IP}，出网网卡: ${WAN_IF:-未知}"
 
 echo "==> 2/6 开启 IPv4 转发"
 mkdir -p /etc/sysctl.d
@@ -519,8 +535,8 @@ bridge_uninstall() {
 bridge_install() {
 # ---- 1. 收集参数：环境变量优先，缺什么提示输入 ----
 if [ -z "${SERVER_HOST:-}" ]; then
-  printf "请输入 VPS IP [38.22.94.13]: "; read -r SERVER_HOST
-  SERVER_HOST=${SERVER_HOST:-38.22.94.13}
+  printf "请输入 VPS 公网 IP: "; read -r SERVER_HOST
+  [ -n "$SERVER_HOST" ] || { echo "未输入 VPS IP，已取消"; exit 1; }
 fi
 if [ -z "${SERVER_PORT:-}" ]; then
   printf "请输入 VPS WireGuard 端口 [51820]: "; read -r SERVER_PORT
