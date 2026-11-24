@@ -363,6 +363,11 @@ echo
 echo "【卸载】$0 vps uninstall"
 }
 
+portal_menu_refresh() {
+  printf "请输入新 VPS IP（回车自动探测本机公网 IP）: "; read -r ip
+  portal_refresh_link "$ip"
+}
+
 vps_menu() {
   while true; do
     clear 2>/dev/null || true
@@ -380,7 +385,7 @@ vps_menu() {
     case "$opt" in
       1) portal_install; pause_to_menu ;;
       2) portal_show_keys; pause_to_menu ;;
-      3) portal_refresh_link ""; pause_to_menu ;;
+      3) portal_menu_refresh; pause_to_menu ;;
       4) portal_uninstall; pause_to_menu ;;
       0|q|quit|exit) echo "Bye."; exit 0 ;;
       *) echo "无此选项，请重新输入"; sleep 1 ;;
@@ -432,12 +437,18 @@ bridge_set_endpoint() {
     wg set wg0 peer "$PUB" endpoint "${NEW_HOST}:${NEW_PORT}" 2>/dev/null \
       && echo "==> 已生效到运行中的 wg0（下一次心跳即重新握手）" \
       || { echo "==> wg set 未生效，重启 wg0"; ifup wg0 2>/dev/null || true; }
+    EP=$(wg show wg0 endpoints 2>/dev/null | awk '{print $2}')
+    HS=$(wg show wg0 latest-handshakes 2>/dev/null | awk '{print $2}')
+    echo "==> endpoint: ${EP:-${NEW_HOST}:${NEW_PORT}}"
+    if [ -n "${HS:-}" ] && [ "$HS" != "0" ]; then
+      echo "==> 对端已有握手（epoch $HS）"
+    else
+      echo "==> 尚未握手，等下一次心跳"
+    fi
   else
     ifup wg0 2>/dev/null || true
+    echo "==> endpoint: ${NEW_HOST}:${NEW_PORT}"
   fi
-
-  echo "-- 当前 wg0 状态 --"
-  wg show wg0 2>/dev/null || uci show network.wg0peer
 }
 
 bridge_uninstall() {
@@ -752,9 +763,12 @@ bridge_menu() {
 }
 
 bridge_menu_endpoint() {
-  printf "请输入新 VPS 地址或域名: "; read -r h
+  printf "请输入新 VPS IP 或域名（可带 :端口，回车取消）: "; read -r h
   [ -n "$h" ] || { echo "已取消"; return 0; }
-  printf "端口 [51820]: "; read -r p
+  case "$h" in
+    *:*) p=${h##*:}; h=${h%:*} ;;
+    *) p=51820 ;;
+  esac
   bridge_set_endpoint "$h" "$p"
 }
 
